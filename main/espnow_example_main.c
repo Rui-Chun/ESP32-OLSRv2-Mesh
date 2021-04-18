@@ -28,6 +28,7 @@
 #include "esp_now.h"
 #include "esp_crc.h"
 #include "espnow_example.h"
+#include "esp_private/wifi.h"
 
 static const char *TAG = "espnow_example";
 
@@ -48,10 +49,16 @@ static void example_wifi_init(void)
     ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
     ESP_ERROR_CHECK( esp_wifi_set_mode(ESPNOW_WIFI_MODE) );
     ESP_ERROR_CHECK( esp_wifi_start());
+    // ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11N) );
+    int8_t power = 0;
+    ESP_ERROR_CHECK( esp_wifi_get_max_tx_power(&power) );
+    ESP_LOGI(TAG, "Default max power =%d * 0.25dbm", power);
+    ESP_ERROR_CHECK( esp_wifi_set_max_tx_power(8) );
+    ESP_ERROR_CHECK( esp_wifi_get_max_tx_power(&power) );
+    ESP_LOGI(TAG, "New max tx power =%d * 0.25dbm", power);
 
-#if CONFIG_ESPNOW_ENABLE_LONG_RANGE
-    ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
-#endif
+    /*set the rate*/
+    ESP_ERROR_CHECK( esp_wifi_internal_set_fix_rate(ESP_IF_WIFI_STA, true, WIFI_PHY_RATE_MCS7_SGI) );
 }
 
 /* ESPNOW sending or receiving callback function is called in WiFi task.
@@ -207,7 +214,7 @@ static void example_espnow_task(void *pvParameter)
                 example_espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
 
                 ret = example_espnow_data_parse(recv_cb->data, recv_cb->data_len, &recv_state, &recv_seq, &recv_magic);
-                free(recv_cb->data);
+                free(recv_cb->data); // Here is the data.
                 if (ret == EXAMPLE_ESPNOW_DATA_BROADCAST) {
                     ESP_LOGI(TAG, "Receive %dth broadcast data from: "MACSTR", len: %d", recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
 
