@@ -50,6 +50,8 @@ static void example_wifi_init(void)
     ESP_ERROR_CHECK( esp_wifi_set_mode(ESPNOW_WIFI_MODE) );
     ESP_ERROR_CHECK( esp_wifi_start());
     // ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11N) );
+
+    // get and set the txpower as the lowest value
     int8_t power = 0;
     ESP_ERROR_CHECK( esp_wifi_get_max_tx_power(&power) );
     ESP_LOGI(TAG, "Default max power =%d * 0.25dbm", power);
