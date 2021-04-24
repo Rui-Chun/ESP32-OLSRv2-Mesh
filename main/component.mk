@@ -3,5 +3,5 @@
 #
 # (Uses default behaviour of compiling all source files in directory, adding 'include' to include path.)
 
-COMPONENT_ADD_INCLUDEDIRS += ../oonf
-COMPONENT_ADD_SRCDIRS := ../OONF_src
+COMPONENT_ADD_INCLUDEDIRS += ./oonf
+COMPONENT_ADD_SRCDIRS := ./OONF_src
