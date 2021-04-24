@@ -7,8 +7,8 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
-#ifndef ESPNOW_EXAMPLE_H
-#define ESPNOW_EXAMPLE_H
+#ifndef ESPNOW_OLSR_H
+#define ESPNOW_OLSR_H
 
 /* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
 #if CONFIG_ESPNOW_WIFI_MODE_STATION

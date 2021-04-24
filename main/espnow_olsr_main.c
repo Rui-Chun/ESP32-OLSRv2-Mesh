@@ -27,12 +27,11 @@
 #include "esp_system.h"
 #include "esp_now.h"
 #include "esp_crc.h"
-#include "espnow_example.h"
 #include "esp_private/wifi.h"
 
-#include "oonf/librfc5444/rfc5444.h"
+#include "espnow_olsr.h"
 
-static const char *TAG = "espnow_example";
+static const char *TAG = "espnow_olsr";
 
 static xQueueHandle s_example_espnow_queue;
 

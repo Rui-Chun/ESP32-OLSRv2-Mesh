@@ -1,9 +1,11 @@
 {
   "C_Cpp.intelliSenseEngine": "Tag Parser",
-  "idf.port": "/dev/cu.usbserial-142320",
+  "idf.port": "/dev/cu.usbserial-0001",
   "idf.flashType": "UART",
   "files.associations": {
-    "numeric": "c"
+    "numeric": "c",
+    "rfc5444.h": "c",
+    "esp_netif.h": "c"
   },
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"
