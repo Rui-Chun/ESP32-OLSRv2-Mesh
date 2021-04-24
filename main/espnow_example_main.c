@@ -30,6 +30,8 @@
 #include "espnow_example.h"
 #include "esp_private/wifi.h"
 
+#include "../oonf/librfc5444/rfc5444.h"
+
 static const char *TAG = "espnow_example";
 
 static xQueueHandle s_example_espnow_queue;
