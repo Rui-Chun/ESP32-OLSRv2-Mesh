@@ -30,6 +30,7 @@ typedef enum {
     ESPNOW_OLSR_SEND_CB,
     ESPNOW_OLSR_RECV_CB,
     ESPNOW_OLSR_SEND_TO,   // to send a packet
+    ESPNOW_OLSR_NO_OP,     // to indicate no op is needed.
     ESPNOW_OLSR_UNDEFINE,
 } espnow_olsr_event_id_t;
 
@@ -46,7 +47,7 @@ typedef struct {
 
 typedef struct {
     // uint8_t dest_addr[ESP_NOW_ETH_ALEN]; // we always broadcast
-    raw_packet pkt;
+    raw_pkt_t pkt;
 } espnow_olsr_event_send_to_t;
 
 typedef union {

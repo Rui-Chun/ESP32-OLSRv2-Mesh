@@ -278,7 +278,7 @@ static void espnow_olsr_task(void *pvParameter)
                 case ESPNOW_OLSR_DATA_S_END: {
                     // this case does not involve pkt buf
                     // call olsr recv packet handler
-                    raw_packet recv_pkt;
+                    raw_pkt_t recv_pkt;
                     recv_pkt.pkt_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
                     recv_pkt.pkt_data = recv_frame->payload;
                     // TODO: this is jsut a fake return value
@@ -331,7 +331,7 @@ static void espnow_olsr_task(void *pvParameter)
                     recv_pkt_offset += tmp_len;
                     ESP_LOGI(TAG, "A new packet received, len = %d", recv_pkt_offset);
                     // call recv pkt handler
-                    raw_packet recv_pkt;
+                    raw_pkt_t recv_pkt;
                     recv_pkt.pkt_len = recv_pkt_offset;
                     recv_pkt.pkt_data = recv_pkt_buf;
                     // TODO: this is jsut a fake return value
@@ -352,6 +352,10 @@ static void espnow_olsr_task(void *pvParameter)
                 }
 
                 free(recv_frame); // MUST free data! this is allocated in recv_cb
+                break;
+            }
+            case ESPNOW_OLSR_NO_OP: {
+                ESP_LOGI("NO OP event called.");
                 break;
             }
             default:
@@ -382,7 +386,7 @@ static void espnow_timer_cb( TimerHandle_t xExpiredTimer )
     }
 
     // push a fake packet
-    raw_packet recv_pkt;
+    raw_pkt_t recv_pkt;
     recv_pkt.pkt_len = 555;
     // this will be freeed by event loop.
     recv_pkt.pkt_data = malloc(recv_pkt.pkt_len);
