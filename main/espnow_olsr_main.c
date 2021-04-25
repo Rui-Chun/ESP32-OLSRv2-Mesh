@@ -36,9 +36,13 @@
 #define ESPNOW_MAX_PAYLOAD_LEN     (ESPNOW_MAX_DATA_LEN - sizeof(espnow_olsr_frame_t)) // the length of payload part in one ESPNOW frame.
 #define ESPNOW_MAX_PKT_LEN         (ESPNOW_MAX_PAYLOAD_LEN * 16) // max supported len of a packet.
 
-static const char *TAG = "espnow_olsr";
+#define xTIMER_PERIOD               (1000 / portTICK_PERIOD_MS)
+
+static const char *TAG = "espnow_event_loop";
 
 static xQueueHandle s_espnow_olsr_queue;
+
+static uint32_t timer_tick_count = 0;
 
 static uint8_t espnow_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 static uint16_t s_espnow_olsr_seq = 0;
@@ -174,9 +178,9 @@ static void espnow_olsr_task(void *pvParameter)
     // for handler return event
     espnow_olsr_event_t ret_evt;
     
-
-    vTaskDelay(5000 / portTICK_RATE_MS);
-    ESP_LOGI(TAG, "Start sending broadcast data");
+    // why wait? this is from the example code.
+    vTaskDelay(1000 / portTICK_RATE_MS);
+    ESP_LOGI(TAG, "ESPNOW event loop starts");
 
     /* Initialize an empty frame to hold data for local use  */
     local_frame = malloc(ESPNOW_MAX_DATA_LEN);
@@ -361,6 +365,40 @@ static void espnow_olsr_task(void *pvParameter)
     free(recv_pkt_buf);
 }
 
+
+static void espnow_timer_cb( TimerHandle_t xExpiredTimer )
+{
+
+    // Increment the variable to show the timer callback has executed.
+    timer_tick_count ++;
+    ESP_LOGI(TAG, "timer tick = %d", timer_tick_count);
+
+    // If this callback has executed the required number of times, stop the
+    // timer.
+    if( timer_tick_count == 100 )
+    {
+        // This is called from a timer callback so must not block.
+        xTimerStop( xExpiredTimer, 0 );
+    }
+
+    // push a fake packet
+    raw_packet recv_pkt;
+    recv_pkt.pkt_len = 555;
+    // this will be freeed by event loop.
+    recv_pkt.pkt_data = malloc(recv_pkt.pkt_len);
+    if (recv_pkt.pkt_data == NULL) {
+        ESP_LOGE(TAG, "packet alloc error!");
+        return;
+    }
+    espnow_olsr_event_t evt;
+    evt.id = ESPNOW_OLSR_SEND_TO;
+    evt.info.send_to.pkt = recv_pkt;
+    // push to queue
+    if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW(TAG, "Send receive queue fail");
+    }
+}
+
 static esp_err_t espnow_olsr_init(void)
 {
 
@@ -396,6 +434,22 @@ static esp_err_t espnow_olsr_init(void)
 
     xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
     // TODO: set up a freeRTOS timer to send out packets.
+    TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
+                                 xTIMER_PERIOD,     // The period of the timer in ticks.
+                                 pdTRUE,           // This is an auto-reload timer.
+                                 NULL,    // An identifier that is assigned to the timer being created.
+                                 espnow_timer_cb // The function to execute when the timer expires.
+                                 );
+
+    // The scheduler has not started yet so a block time is not used.
+    if( xTimerStart( xTimer_h, 0 ) != pdPASS )
+    {
+        // The timer could not be set into the Active state.
+        ESP_LOGE(TAG, "Timer start error!");
+    }
+
+    // This FreeRTOS call is not required as the scheduler is already started before app_main() call
+    // vTaskStartScheduler();
 
     return ESP_OK;
 }
