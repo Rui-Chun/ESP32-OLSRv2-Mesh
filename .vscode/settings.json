@@ -6,7 +6,8 @@
     "numeric": "c",
     "rfc5444.h": "c",
     "esp_netif.h": "c",
-    "wifi.h": "c"
+    "wifi.h": "c",
+    "thread": "c"
   },
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"

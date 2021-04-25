@@ -7,6 +7,8 @@
 #ifndef RFC_5444_H
 #define RFC_5444_H
 #include <stdint.h>
+#include <assert.h>
+#include "esp_log.h"
 
 // the packet bytes to be sent to or received from.
 typedef struct raw_pkt_t {
@@ -26,13 +28,13 @@ typedef struct raw_pkt_t {
 #define MSG_FLAGS_TC            15   
 #define MSG_ADDR_LEN            (RFC5444_ADDR_LEN - 1)
 
-enum msg_type_t {
-    MSG_TYPE_HELLO,
+typedef enum {
+    MSG_TYPE_HELLO = 1,
     MSG_TYPE_TC,
-}
+} msg_type_t;
 
 typedef struct msg_header_t {
-    uint8_t msg_type,   // an 8-bit unsigned integer field, specifying the type of the message.
+    uint8_t msg_type;   // an 8-bit unsigned integer field, specifying the type of the message.
     uint8_t msg_flags;  // a 4-bit field, specifying the interpretation of the remainder of the Message Header
     uint8_t msg_addr_len; // a 4-bit unsigned integer field, encoding the length of all addresses included in this message
                           //  the length of an address in octets - 1, very strange ...
@@ -53,17 +55,18 @@ enum tlv_type_t {
     MPR_WILLING,
     LINK_STATUS, // first byte = start index, second byte = stop index
     LINK_METRIC,
-}
+};
 
 enum link_status_t {
     LINK_HEARD,
     SYMMETRIC,
     LOST,
-}
+};
 
+// TODO
 enum addr_flag {
-
-}
+    NORMAL_ADDR,
+};
 
 typedef struct tlv_t {
     uint8_t tlv_type;

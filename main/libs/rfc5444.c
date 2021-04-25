@@ -13,7 +13,7 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
     raw_pkt_ptr += 2;
 
     // get msg_type
-    switch *raw_pkt_ptr {
+    switch ((msg_type_t)(*raw_pkt_ptr)) {
         MSG_TYPE_HELLO: {
             // TODO: parse HELLO msg
             break;
@@ -27,6 +27,7 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
         }
     }
 
+    return ret_pkt; // user of this pkt must free it.
 }
 
 hello_msg_t* parse_hello_msg(uint8_t* msg_data) {
@@ -34,5 +35,5 @@ hello_msg_t* parse_hello_msg(uint8_t* msg_data) {
 }
 
 raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt) {
-    
+
 }

@@ -355,7 +355,7 @@ static void espnow_olsr_task(void *pvParameter)
                 break;
             }
             case ESPNOW_OLSR_NO_OP: {
-                ESP_LOGI("NO OP event called.");
+                ESP_LOGI(TAG, "NO OP event called.");
                 break;
             }
             default:
