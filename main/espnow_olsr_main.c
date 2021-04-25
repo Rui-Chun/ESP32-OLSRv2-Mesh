@@ -30,15 +30,20 @@
 #include "esp_private/wifi.h"
 
 #include "espnow_olsr.h"
+#include "libs/olsr_handlers.h"
+
+#define ESPNOW_MAX_DATA_LEN        (250)
+#define ESPNOW_MAX_PAYLOAD_LEN     (ESPNOW_MAX_DATA_LEN - sizeof(espnow_olsr_frame_t)) // the length of payload part in one ESPNOW frame.
+#define ESPNOW_MAX_PKT_LEN         (ESPNOW_MAX_PAYLOAD_LEN * 16) // max supported len of a packet.
 
 static const char *TAG = "espnow_olsr";
 
 static xQueueHandle s_espnow_olsr_queue;
 
-static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-static uint16_t s_espnow_olsr_seq[ESPNOW_OLSR_DATA_MAX] = { 0, 0 };
+static uint8_t espnow_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+static uint16_t s_espnow_olsr_seq = 0;
 
-static void espnow_olsr_deinit(espnow_olsr_send_param_t *send_param);
+static void espnow_olsr_deinit();
 
 /* WiFi should start before using ESPNOW */
 static void example_wifi_init(void)
@@ -76,13 +81,18 @@ static void espnow_olsr_send_cb(const uint8_t *mac_addr, esp_now_send_status_t s
         ESP_LOGE(TAG, "Send cb arg error");
         return;
     }
+    if (status == ESP_NOW_SEND_FAIL) {
+        ESP_LOGE(TAG, "Send espnow frame failed!");
+    }
 
     evt.id = ESPNOW_OLSR_SEND_CB;
     memcpy(send_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
     send_cb->status = status;
-    if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGW(TAG, "Send send queue fail");
-    }
+
+    // stop send this event.
+    // if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
+    //     ESP_LOGW(TAG, "Send send queue fail");
+    // }
 }
 
 static void espnow_olsr_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
@@ -110,177 +120,234 @@ static void espnow_olsr_recv_cb(const uint8_t *mac_addr, const uint8_t *data, in
     }
 }
 
-/* Parse received ESPNOW data. */
-int espnow_olsr_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, uint16_t *seq, int *magic)
+/* Check received ESPNOW data crc and len. */
+int espnow_olsr_data_check(uint8_t *data, uint16_t data_len)
 {
-    espnow_olsr_data_t *buf = (espnow_olsr_data_t *)data;
+    espnow_olsr_frame_t *frame = (espnow_olsr_frame_t *)data;
+    assert(frame != NULL);
     uint16_t crc, crc_cal = 0;
 
-    if (data_len < sizeof(espnow_olsr_data_t)) {
+    if (data_len < sizeof(espnow_olsr_frame_t)) {
         ESP_LOGE(TAG, "Receive ESPNOW data too short, len:%d", data_len);
         return -1;
     }
 
-    *state = buf->state;
-    *seq = buf->seq_num;
-    *magic = buf->magic;
-    crc = buf->crc;
-    buf->crc = 0;
-    crc_cal = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, data_len);
+    crc = frame->crc;
+    frame->crc = 0;
+    crc_cal = esp_crc16_le(UINT16_MAX, (uint8_t const *)frame, data_len);
 
-    if (crc_cal == crc) {
-        return buf->type;
+    if (crc_cal == crc && frame->len == data_len) {
+        return 1; // check done
     }
 
+    // crc check fail
     return -1;
 }
 
 /* Prepare ESPNOW data to be sent. */
-void espnow_olsr_data_prepare(espnow_olsr_send_param_t *send_param)
+void espnow_olsr_frame_prepare(espnow_olsr_frame_t *espnow_frame, espnow_seg_state_t state, uint8_t* payload, uint8_t payload_len)
 {
-    espnow_olsr_data_t *buf = (espnow_olsr_data_t *)send_param->buffer;
+    assert(espnow_frame != NULL); // please also make sure it has enough space.
+    assert(payload_len <= ESPNOW_MAX_PAYLOAD_LEN);
 
-    assert(send_param->len >= sizeof(espnow_olsr_data_t));
-
-    buf->type = IS_BROADCAST_ADDR(send_param->dest_mac) ? ESPNOW_OLSR_DATA_BROADCAST : ESPNOW_OLSR_DATA_UNICAST;
-    buf->state = send_param->state;
-    buf->seq_num = s_espnow_olsr_seq[buf->type]++;
-    buf->crc = 0;
-    buf->magic = send_param->magic;
-    /* Fill all remaining bytes after the data with random values */
-    esp_fill_random(buf->payload, send_param->len - sizeof(espnow_olsr_data_t));
-    buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_param->len);
+    espnow_frame->seq_num = s_espnow_olsr_seq++;
+    espnow_frame->seg_state = state;
+    espnow_frame->crc = 0;
+    espnow_frame->len = payload_len + sizeof(espnow_olsr_frame_t);
+    memcpy(espnow_frame->payload, payload, payload_len); 
+    espnow_frame->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)espnow_frame, espnow_frame->len);
 }
 
 static void espnow_olsr_task(void *pvParameter)
 {
     espnow_olsr_event_t evt;
-    uint8_t recv_state = 0;
-    uint16_t recv_seq = 0;
-    int recv_magic = 0;
-    bool is_broadcast = false;
-    int ret;
+    espnow_olsr_frame_t *local_frame = NULL; 
+    uint8_t pkt_seg_num = 0; // how many seg in a packet.
+
+    // for recv packet
+    uint8_t recv_mac_addr[ESP_NOW_ETH_ALEN];
+    memcpy(recv_mac_addr, espnow_broadcast_mac, ESP_NOW_ETH_ALEN);
+    uint16_t recv_seq_num = 0;
+    uint8_t *recv_pkt_buf = NULL;
+    uint16_t recv_pkt_offset = 0;
+
+    // for handler return event
+    espnow_olsr_event_t ret_evt;
+    
 
     vTaskDelay(5000 / portTICK_RATE_MS);
     ESP_LOGI(TAG, "Start sending broadcast data");
 
-    /* Start sending broadcast ESPNOW data. */
-    espnow_olsr_send_param_t *send_param = (espnow_olsr_send_param_t *)pvParameter;
-    if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
-        ESP_LOGE(TAG, "Send error");
-        espnow_olsr_deinit(send_param);
+    /* Initialize an empty frame to hold data for local use  */
+    local_frame = malloc(ESPNOW_MAX_DATA_LEN);
+    if (local_frame == NULL) {
+        ESP_LOGE(TAG, "frame alloc failed");
+        espnow_olsr_deinit();
+        vTaskDelete(NULL);
+    }
+    /* Initialize an empty packet to hold data for recv buf  */
+    recv_pkt_buf = malloc(ESPNOW_MAX_PKT_LEN);
+    if (recv_pkt_buf == NULL) {
+        ESP_LOGE(TAG, "packet buf alloc failed");
+        free(local_frame);
+        espnow_olsr_deinit();
         vTaskDelete(NULL);
     }
 
+
+    // espnow event loop, should loop forever.
     while (xQueueReceive(s_espnow_olsr_queue, &evt, portMAX_DELAY) == pdTRUE) {
         switch (evt.id) {
-            case ESPNOW_OLSR_SEND_CB:
+            // a packet need to be sent, most likely we need send multiple frames
+            case ESPNOW_OLSR_SEND_TO:
             {
-                espnow_olsr_event_send_cb_t *send_cb = &evt.info.send_cb;
-                is_broadcast = IS_BROADCAST_ADDR(send_cb->mac_addr);
+                espnow_olsr_event_send_to_t *send_to_info = &evt.info.send_to;
 
-                ESP_LOGD(TAG, "Send data to "MACSTR", status1: %d", MAC2STR(send_cb->mac_addr), send_cb->status);
+                ESP_LOGI(TAG, "Handling SEND_TO event");
+                if(send_to_info->pkt.pkt_len == 0) break;
+                // calculate number of frames/segments needed for this packet.
+                pkt_seg_num = (send_to_info->pkt.pkt_len + ESPNOW_MAX_PAYLOAD_LEN -1 )/ ESPNOW_MAX_PAYLOAD_LEN; 
+                assert(pkt_seg_num >= 1 && pkt_seg_num < 16); // it should not be very large.
 
-                if (is_broadcast && (send_param->broadcast == false)) {
-                    break;
-                }
-
-                if (!is_broadcast) {
-                    send_param->count--;
-                    if (send_param->count == 0) {
-                        ESP_LOGI(TAG, "Send done");
-                        espnow_olsr_deinit(send_param);
+                /* prepare data and send out. */
+                // loop over segments/frames
+                for (int p = 0; p < pkt_seg_num; p++) {
+                    // Is this the last segment/frame?
+                    if (p == pkt_seg_num - 1) {
+                        // first and also the last
+                        if (p == 0) {
+                            espnow_olsr_frame_prepare(local_frame, ESPNOW_OLSR_DATA_S_END,\
+                                                  send_to_info->pkt.pkt_data, send_to_info->pkt.pkt_len);
+                        } else {
+                            espnow_olsr_frame_prepare(local_frame, ESPNOW_OLSR_DATA_END,\
+                                                  send_to_info->pkt.pkt_data + p * ESPNOW_MAX_PAYLOAD_LEN, send_to_info->pkt.pkt_len - p*ESPNOW_MAX_PAYLOAD_LEN);
+                        }
+                    } else {
+                        // if first frame of multiple ones
+                        if (p == 0) {
+                            espnow_olsr_frame_prepare(local_frame, ESPNOW_OLSR_DATA_START,\
+                                                  send_to_info->pkt.pkt_data, ESPNOW_MAX_PAYLOAD_LEN);
+                        } else {
+                            espnow_olsr_frame_prepare(local_frame, ESPNOW_OLSR_DATA_MORE,\
+                                                  send_to_info->pkt.pkt_data + p * ESPNOW_MAX_PAYLOAD_LEN, ESPNOW_MAX_PAYLOAD_LEN);
+                        }
+                    }
+                    // send the frame to broadcast address now 
+                    if (esp_now_send(espnow_broadcast_mac, (const uint8_t *)local_frame, local_frame->len) != ESP_OK) {
+                        ESP_LOGE(TAG, "ESPNOW Send error!");
+                        espnow_olsr_deinit();
                         vTaskDelete(NULL);
                     }
+                    // clear up
+                    memset(local_frame, 0, ESPNOW_MAX_DATA_LEN);
                 }
-
-                /* Delay a while before sending the next data. */
-                if (send_param->delay > 0) {
-                    vTaskDelay(send_param->delay/portTICK_RATE_MS);
-                }
-
-                ESP_LOGI(TAG, "send data to "MACSTR"", MAC2STR(send_cb->mac_addr));
-
-                memcpy(send_param->dest_mac, send_cb->mac_addr, ESP_NOW_ETH_ALEN);
-                espnow_olsr_data_prepare(send_param);
-
-                /* Send the next data after the previous data is sent. */
-                if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
-                    ESP_LOGE(TAG, "Send error");
-                    espnow_olsr_deinit(send_param);
-                    vTaskDelete(NULL);
-                }
+                // MUST free the data
+                free(send_to_info->pkt.pkt_data);
+                break;
+            }
+            case ESPNOW_OLSR_SEND_CB:
+            {
+                // do nothing, this should not be called.
+                ESP_LOGI(TAG, "Handling SEND_CB event");
                 break;
             }
             case ESPNOW_OLSR_RECV_CB:
             {
-                espnow_olsr_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
+                espnow_olsr_event_recv_cb_t *recv_cb_info = &evt.info.recv_cb;
+                assert(recv_cb_info != NULL);
+                ESP_LOGI(TAG, "Handling SEND_TO event");
 
-                ret = espnow_olsr_data_parse(recv_cb->data, recv_cb->data_len, &recv_state, &recv_seq, &recv_magic);
-                free(recv_cb->data); // Here is the data.
-                if (ret == ESPNOW_OLSR_DATA_BROADCAST) {
-                    ESP_LOGI(TAG, "Receive %dth broadcast data from: "MACSTR", len: %d", recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
-
-                    /* If MAC address does not exist in peer list, add it to peer list. */
-                    if (esp_now_is_peer_exist(recv_cb->mac_addr) == false) {
-                        esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
-                        if (peer == NULL) {
-                            ESP_LOGE(TAG, "Malloc peer information fail");
-                            espnow_olsr_deinit(send_param);
-                            vTaskDelete(NULL);
-                        }
-                        memset(peer, 0, sizeof(esp_now_peer_info_t));
-                        peer->channel = CONFIG_ESPNOW_CHANNEL;
-                        peer->ifidx = ESPNOW_WIFI_IF;
-                        peer->encrypt = true;
-                        memcpy(peer->lmk, CONFIG_ESPNOW_LMK, ESP_NOW_KEY_LEN);
-                        memcpy(peer->peer_addr, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
-                        ESP_ERROR_CHECK( esp_now_add_peer(peer) );
-                        free(peer);
-                    }
-
-                    /* Indicates that the device has received broadcast ESPNOW data. */
-                    if (send_param->state == 0) {
-                        send_param->state = 1;
-                    }
-
-                    /* If receive broadcast ESPNOW data which indicates that the other device has received
-                     * broadcast ESPNOW data and the local magic number is bigger than that in the received
-                     * broadcast ESPNOW data, stop sending broadcast ESPNOW data and start sending unicast
-                     * ESPNOW data.
-                     */
-                    if (recv_state == 1) {
-                        /* The device which has the bigger magic number sends ESPNOW data, the other one
-                         * receives ESPNOW data.
-                         */
-                        if (send_param->unicast == false && send_param->magic >= recv_magic) {
-                    	    ESP_LOGI(TAG, "Start sending unicast data");
-                    	    ESP_LOGI(TAG, "send data to "MACSTR"", MAC2STR(recv_cb->mac_addr));
-
-                    	    /* Start sending unicast ESPNOW data. */
-                            memcpy(send_param->dest_mac, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
-                            espnow_olsr_data_prepare(send_param);
-                            if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
-                                ESP_LOGE(TAG, "Send error");
-                                espnow_olsr_deinit(send_param);
-                                vTaskDelete(NULL);
-                            }
-                            else {
-                                send_param->broadcast = false;
-                                send_param->unicast = true;
-                            }
-                        }
-                    }
+                if (espnow_olsr_data_check(recv_cb_info->data, recv_cb_info->data_len) < 0 ) {
+                    ESP_LOGE(TAG, "Recv data check failed. len = %d", recv_cb_info->data_len);
+                    break;
                 }
-                else if (ret == ESPNOW_OLSR_DATA_UNICAST) {
-                    ESP_LOGI(TAG, "Receive %dth unicast data from: "MACSTR", len: %d", recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
+                // check done, get frame now
+                espnow_olsr_frame_t *recv_frame = (espnow_olsr_frame_t *)recv_cb_info->data;
+                // print recv info
+                ESP_LOGI(TAG, "Receive %dth broadcast data from: "MACSTR", len: %d",\
+                            recv_frame->seq_num, MAC2STR(recv_cb_info->mac_addr), recv_cb_info->data_len);
 
-                    /* If receive unicast ESPNOW data, also stop sending broadcast ESPNOW data. */
-                    send_param->broadcast = false;
+                // handle segments
+                switch (recv_frame->seg_state)
+                {
+                // TODO: handle segmets, what if we lose some segments?
+                case ESPNOW_OLSR_DATA_S_END: {
+                    // this case does not involve pkt buf
+                    // call olsr recv packet handler
+                    raw_packet recv_pkt;
+                    recv_pkt.pkt_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
+                    recv_pkt.pkt_data = recv_frame->payload;
+                    // TODO: this is jsut a fake return value
+                    ret_evt = olsr_recv_pkt_handler(recv_pkt);
+                    // push to queue
+                    if (xQueueSend(s_espnow_olsr_queue, &ret_evt, portMAX_DELAY) != pdTRUE) {
+                        ESP_LOGW(TAG, "Send receive queue fail");
+                    }
+                    break;
                 }
-                else {
-                    ESP_LOGI(TAG, "Receive error data from: "MACSTR"", MAC2STR(recv_cb->mac_addr));
+                case ESPNOW_OLSR_DATA_START: {
+                    if(recv_pkt_offset != 0) {
+                        ESP_LOGW(TAG, "A newpacket starts. Old packet is dropped!");
+                        // clean up the buf
+                        memset(recv_pkt_buf, 0, ESPNOW_MAX_PKT_LEN);
+                        recv_pkt_offset = 0;
+                    }
+                    // update all recv states
+                    uint8_t tmp_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
+                    memcpy(recv_pkt_buf, recv_frame->payload, tmp_len);
+                    recv_pkt_offset += tmp_len;
+                    memcpy(recv_mac_addr, recv_cb_info->mac_addr, ESP_NOW_ETH_ALEN);
+                    recv_seq_num = recv_frame->seq_num;
+                    break;
                 }
+                case ESPNOW_OLSR_DATA_MORE: {
+                    int tmp_ret = memcmp(recv_mac_addr, recv_cb_info->mac_addr, ESP_NOW_ETH_ALEN);
+                    // the frame must be from the same mac, right seq_num and with right offset value
+                    if (tmp_ret != 0 || recv_seq_num != recv_frame->seq_num - 1 || recv_pkt_offset == 0) {
+                        ESP_LOGW(TAG, "A wrong frame with DATA_MORE flag!");
+                        break;
+                    }
+                    // update all recv states
+                    uint8_t tmp_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
+                    memcpy(recv_pkt_buf + recv_pkt_offset, recv_frame->payload, tmp_len);
+                    recv_pkt_offset += tmp_len;
+                    recv_seq_num ++;
+                    break;
+                }
+                case ESPNOW_OLSR_DATA_END: {
+                    int tmp_ret = memcmp(recv_mac_addr, recv_cb_info->mac_addr, ESP_NOW_ETH_ALEN);
+                    // the frame must be from the same mac, right seq_num and with right offset value
+                    if (tmp_ret != 0 || recv_seq_num != recv_frame->seq_num - 1 || recv_pkt_offset == 0) {
+                        ESP_LOGW(TAG, "A wrong frame with DATA_END flag!");
+                        break;
+                    }
+                    // update all recv states
+                    uint8_t tmp_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
+                    memcpy(recv_pkt_buf + recv_pkt_offset, recv_frame->payload, tmp_len);
+                    recv_pkt_offset += tmp_len;
+                    ESP_LOGI(TAG, "A new packet received, len = %d", recv_pkt_offset);
+                    // call recv pkt handler
+                    raw_packet recv_pkt;
+                    recv_pkt.pkt_len = recv_pkt_offset;
+                    recv_pkt.pkt_data = recv_pkt_buf;
+                    // TODO: this is jsut a fake return value
+                    ret_evt = olsr_recv_pkt_handler(recv_pkt);
+                    // push to queue
+                    if (xQueueSend(s_espnow_olsr_queue, &ret_evt, portMAX_DELAY) != pdTRUE) {
+                        ESP_LOGW(TAG, "Send receive queue fail");
+                    }
+                    // clean up the buf
+                    memset(recv_pkt_buf, 0, ESPNOW_MAX_PKT_LEN);
+                    recv_pkt_offset = 0;
+                    recv_seq_num = 0;
+                    break;
+                }
+                default:
+                    ESP_LOGE(TAG, "Recv frame seg_state unknown");
+                    break;
+                }
+
+                free(recv_frame); // MUST free data! this is allocated in recv_cb
                 break;
             }
             default:
@@ -288,11 +355,14 @@ static void espnow_olsr_task(void *pvParameter)
                 break;
         }
     }
+
+    // free local buf now
+    free(local_frame);
+    free(recv_pkt_buf);
 }
 
 static esp_err_t espnow_olsr_init(void)
 {
-    espnow_olsr_send_param_t *send_param;
 
     s_espnow_olsr_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_olsr_event_t));
     if (s_espnow_olsr_queue == NULL) {
@@ -302,7 +372,7 @@ static esp_err_t espnow_olsr_init(void)
 
     /* Initialize ESPNOW and register sending and receiving callback function. */
     ESP_ERROR_CHECK( esp_now_init() );
-    ESP_ERROR_CHECK( esp_now_register_send_cb(espnow_olsr_send_cb) );
+    ESP_ERROR_CHECK( esp_now_register_send_cb(espnow_olsr_send_cb) ); // Do we need this?
     ESP_ERROR_CHECK( esp_now_register_recv_cb(espnow_olsr_recv_cb) );
 
     /* Set primary master key. */
@@ -320,46 +390,18 @@ static esp_err_t espnow_olsr_init(void)
     peer->channel = CONFIG_ESPNOW_CHANNEL;
     peer->ifidx = ESPNOW_WIFI_IF;
     peer->encrypt = false;
-    memcpy(peer->peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
+    memcpy(peer->peer_addr, espnow_broadcast_mac, ESP_NOW_ETH_ALEN);
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
     free(peer);
 
-    /* Initialize sending parameters. */
-    send_param = malloc(sizeof(espnow_olsr_send_param_t));
-    memset(send_param, 0, sizeof(espnow_olsr_send_param_t));
-    if (send_param == NULL) {
-        ESP_LOGE(TAG, "Malloc send parameter fail");
-        vSemaphoreDelete(s_espnow_olsr_queue);
-        esp_now_deinit();
-        return ESP_FAIL;
-    }
-    send_param->unicast = false;
-    send_param->broadcast = true;
-    send_param->state = 0;
-    send_param->magic = esp_random();
-    send_param->count = CONFIG_ESPNOW_SEND_COUNT;
-    send_param->delay = CONFIG_ESPNOW_SEND_DELAY;
-    send_param->len = CONFIG_ESPNOW_SEND_LEN;
-    send_param->buffer = malloc(CONFIG_ESPNOW_SEND_LEN);
-    if (send_param->buffer == NULL) {
-        ESP_LOGE(TAG, "Malloc send buffer fail");
-        free(send_param);
-        vSemaphoreDelete(s_espnow_olsr_queue);
-        esp_now_deinit();
-        return ESP_FAIL;
-    }
-    memcpy(send_param->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-    espnow_olsr_data_prepare(send_param);
-
-    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 2048, send_param, 4, NULL);
+    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
+    // TODO: set up a freeRTOS timer to send out packets.
 
     return ESP_OK;
 }
 
-static void espnow_olsr_deinit(espnow_olsr_send_param_t *send_param)
+static void espnow_olsr_deinit()
 {
-    free(send_param->buffer);
-    free(send_param);
     vSemaphoreDelete(s_espnow_olsr_queue);
     esp_now_deinit();
 }

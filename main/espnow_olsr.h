@@ -10,6 +10,9 @@
 #ifndef ESPNOW_OLSR_H
 #define ESPNOW_OLSR_H
 
+#include "esp_now.h"
+#include "libs/rfc5444.h"
+
 /* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
 #if CONFIG_ESPNOW_WIFI_MODE_STATION
 #define ESPNOW_WIFI_MODE WIFI_MODE_STA
@@ -26,6 +29,8 @@
 typedef enum {
     ESPNOW_OLSR_SEND_CB,
     ESPNOW_OLSR_RECV_CB,
+    ESPNOW_OLSR_SEND_TO,   // to send a packet
+    ESPNOW_OLSR_UNDEFINE,
 } espnow_olsr_event_id_t;
 
 typedef struct {
@@ -39,9 +44,15 @@ typedef struct {
     int data_len;
 } espnow_olsr_event_recv_cb_t;
 
+typedef struct {
+    // uint8_t dest_addr[ESP_NOW_ETH_ALEN]; // we always broadcast
+    raw_packet pkt;
+} espnow_olsr_event_send_to_t;
+
 typedef union {
     espnow_olsr_event_send_cb_t send_cb;
     espnow_olsr_event_recv_cb_t recv_cb;
+    espnow_olsr_event_send_to_t send_to;
 } espnow_olsr_event_info_t;
 
 /* When ESPNOW sending or receiving callback function is called, post event to ESPNOW task. */
@@ -50,33 +61,21 @@ typedef struct {
     espnow_olsr_event_info_t info;
 } espnow_olsr_event_t;
 
-enum {
-    ESPNOW_OLSR_DATA_BROADCAST,
-    ESPNOW_OLSR_DATA_UNICAST,
-    ESPNOW_OLSR_DATA_MAX,
-};
+typedef enum {
+    ESPNOW_OLSR_DATA_START = 0, // start of a packet consisting of multiple frames.
+    ESPNOW_OLSR_DATA_MORE, // more frames will follow to form a full packet.
+    ESPNOW_OLSR_DATA_END,
+    ESPNOW_OLSR_DATA_S_END, // only one frame.
+} espnow_seg_state_t; // packet segmentation state
 
 /* User defined field of ESPNOW data in this example. */
 typedef struct {
-    uint8_t type;                         //Broadcast or unicast ESPNOW data.
-    uint8_t state;                        //Indicate that if has received broadcast ESPNOW data or not.
-    uint16_t seq_num;                     //Sequence number of ESPNOW data.
+    uint16_t seq_num;                     //Sequence number of ESPNOW data from a given device
+    uint8_t seg_state;                    //Indicate packet segmentation state
     uint16_t crc;                         //CRC16 value of ESPNOW data.
-    uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
-    uint8_t payload[0];                   //Real payload of ESPNOW data.
-} __attribute__((packed)) espnow_olsr_data_t;
+    uint8_t len;                          //total len of the frame including header. this must <= 250 (espnow limit)
+    uint8_t payload[0];                   //Payload of ESPNOW data. zero size array so payload will point to successive bytes.
+} __attribute__((packed)) espnow_olsr_frame_t;
 
-/* Parameters of sending ESPNOW data. */
-typedef struct {
-    bool unicast;                         //Send unicast ESPNOW data.
-    bool broadcast;                       //Send broadcast ESPNOW data.
-    uint8_t state;                        //Indicate that if has received broadcast ESPNOW data or not.
-    uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
-    uint16_t count;                       //Total count of unicast ESPNOW data to be sent.
-    uint16_t delay;                       //Delay between sending two ESPNOW data, unit: ms.
-    int len;                              //Length of ESPNOW data to be sent, unit: byte.
-    uint8_t *buffer;                      //Buffer pointing to ESPNOW data.
-    uint8_t dest_mac[ESP_NOW_ETH_ALEN];   //MAC address of destination device.
-} espnow_olsr_send_param_t;
 
 #endif
