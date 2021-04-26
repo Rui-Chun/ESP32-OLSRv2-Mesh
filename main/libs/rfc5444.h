@@ -79,6 +79,7 @@ typedef struct tlv_block_t
 {
     uint8_t tlv_block_type;
     uint8_t tlv_ptr_len; // length of the tlv_ptr_list
+    uint16_t tlv_block_size; // size of rest of the block.
     tlv_t*   tlv_ptr_list[0]; // Note: this is a list of pointer.
 } __attribute__((packed)) tlv_block_t;
 

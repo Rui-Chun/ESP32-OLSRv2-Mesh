@@ -274,7 +274,7 @@ static void espnow_olsr_task(void *pvParameter)
                 // handle segments
                 switch (recv_frame->seg_state)
                 {
-                // TODO: handle segmets, what if we lose some segments?
+                // handle segmets, what if we lose some segments?
                 case ESPNOW_OLSR_DATA_S_END: {
                     // this case does not involve pkt buf
                     // call olsr recv packet handler
@@ -437,7 +437,7 @@ static esp_err_t espnow_olsr_init(void)
     free(peer);
 
     xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
-    // TODO: set up a freeRTOS timer to send out packets.
+    // set up a freeRTOS timer to send out packets.
     TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
                                  xTIMER_PERIOD,     // The period of the timer in ticks.
                                  pdTRUE,           // This is an auto-reload timer.
