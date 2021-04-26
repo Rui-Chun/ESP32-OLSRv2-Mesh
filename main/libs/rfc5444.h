@@ -8,6 +8,7 @@
 #define RFC_5444_H
 #include <stdint.h>
 #include <assert.h>
+#include <string.h>
 #include "esp_log.h"
 
 // the packet bytes to be sent to or received from.
@@ -71,15 +72,14 @@ enum addr_flag {
 typedef struct tlv_t {
     uint8_t tlv_type;
     uint8_t tlv_value_len;
-    uint8_t tlv_value[0];
+    uint8_t tlv_value[0]; // not a pointer finally. just free this tlv!
 } __attribute__((packed)) tlv_t;
 
 typedef struct tlv_block_t
 {
     uint8_t tlv_block_type;
-    uint16_t tlvs_length; // a 16-bit unsigned integer field that contains the total number of octets 
-                          // in all of the immediately following <tlv> elements (<tlvs-length> not included).
-    tlv_t   tlv_list[0];
+    uint8_t tlv_ptr_len; // length of the tlv_ptr_list
+    tlv_t*   tlv_ptr_list[0]; // Note: this is a list of pointer.
 } __attribute__((packed)) tlv_block_t;
 
 typedef struct addr_block_t
@@ -89,6 +89,7 @@ typedef struct addr_block_t
 } __attribute__((packed)) addr_block_t;
 
 
+// msg must be created by alloc.
 typedef struct hello_msg_t {
     msg_header_t header;
     // this struct will only hold pointers to blocks
@@ -115,6 +116,7 @@ typedef struct rfc5444_pkt_t {
     // just use a byte to hold 4-bit field to keep things simple ...
     uint8_t version;    // 4-bit unsigned integer field, version 0
     uint8_t pkt_flags;  // 4-bit field, bit 0 (pkt has seq_num), bit 1 (pkt has tlv).
+    uint16_t pkt_len;   // pkt length, not in rfc5444, added for convenience.
     // rfc5444_msg_ptr msg_list[RFC5444_MAX_MSG_NUM]; // list of ptr to the msg
     hello_msg_t* hello_msg_ptr;
     tc_msg_t* tc_msg_ptr;
