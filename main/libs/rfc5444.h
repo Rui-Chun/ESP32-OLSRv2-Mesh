@@ -39,7 +39,7 @@ typedef struct msg_header_t {
     uint8_t msg_flags;  // a 4-bit field, specifying the interpretation of the remainder of the Message Header
     uint8_t msg_addr_len; // a 4-bit unsigned integer field, encoding the length of all addresses included in this message
                           //  the length of an address in octets - 1, very strange ...
-    uint16_t msg_size;    // a 16-bit unsigned integer field, specifying the number of octets that make up the <message>
+    uint16_t msg_size;    // a 16-bit unsigned integer field, specifying the number of octets that make up the <message> excluding the header.
     uint8_t msg_orig_addr[RFC5444_ADDR_LEN]; // msg originator address
     uint8_t msg_hop_limit;
     uint8_t msg_hop_count;
@@ -49,14 +49,14 @@ typedef struct msg_header_t {
 } msg_header_t;
 
 // Summarize all kinds of tlv here.
-enum tlv_type_t {
+typedef enum tlv_type_t {
     VALIDITY_TIME,
     INTERVAL_TIME,
     CONT_SEQ_NUM,
     MPR_WILLING,
-    LINK_STATUS, // first byte = start index, second byte = stop index
+    LINK_STATUS, // TODO: combine multiple statistic
     LINK_METRIC,
-};
+} tlv_type_t;
 
 // TODO
 enum addr_flag {
@@ -79,7 +79,7 @@ typedef struct tlv_block_t
 
 typedef struct addr_block_t
 {
-    uint8_t addr_num;
+    uint16_t addr_num;
     uint8_t addr_list[0];       // Notice: each addr has RFC5444_ADDR_LEN bytes.
 } __attribute__((packed)) addr_block_t;
 
@@ -119,6 +119,9 @@ typedef struct rfc5444_pkt_t {
 
 
 /* exported functions */
+uint8_t cal_tlv_len(tlv_type);
+uint16_t get_tlv_block_len (tlv_block_t* tlv_block);
+uint16_t get_addr_block_len (addr_block_t* addr_block_ptr);
 void free_rfc5444_pkt(rfc5444_pkt_t);
 rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet);
 raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt);

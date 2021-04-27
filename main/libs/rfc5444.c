@@ -8,6 +8,21 @@ uint8_t get_tlv_len (tlv_t* tlv_ptr) {
     return sizeof(tlv_t) + tlv_ptr->tlv_value_len;
 }
 
+uint8_t cal_tlv_len (tlv_type_t type) {
+    switch (type) {
+        case VALIDITY_TIME: {
+            return sizeof(tlv_t) + 1;
+        }
+        case INTERVAL_TIME: {
+            return sizeof(tlv_t) + 1;
+        }
+        default: {
+            ESP_LOGW(TAG, "Unknown tlv type!");
+            return 0;
+        }
+    }
+}
+
 void free_tlv_block (tlv_block_t* tlv_block_ptr) {
     if (tlv_block_ptr == NULL) {
         // empty tlv block

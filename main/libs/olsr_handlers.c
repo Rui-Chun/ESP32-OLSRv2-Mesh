@@ -37,16 +37,19 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     ESP_LOGI(TAG, "Time tick #%d is up!", tick_num);
     // TODO: logic here
     // 1. send out possible hello msg
-    new_rfc_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
-    if (new_rfc_pkt.hello_msg_ptr == NULL) {
-        ESP_LOGE(TAG, "No mem for new hello msg!");
-        free_rfc5444_pkt(new_rfc_pkt);
-        return ret_evt;
+    if (tick_num % HELLO_INTERVAL_TICKS == 0) {
+        new_rfc_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
+        if (new_rfc_pkt.hello_msg_ptr == NULL) {
+            ESP_LOGE(TAG, "No mem for new hello msg!");
+            free_rfc5444_pkt(new_rfc_pkt);
+            return ret_evt;
+        }
+        memset(new_rfc_pkt.hello_msg_ptr, 0, sizeof(hello_msg_t));
+        gen_hello_msg(new_rfc_pkt.hello_msg_ptr);
     }
-    memset(new_rfc_pkt.hello_msg_ptr, 0, sizeof(hello_msg_t));
-    gen_hello_msg(new_rfc_pkt.hello_msg_ptr);
     
     // TODO: gen raw pkt and send to event
+    
     // TODO: update info base if time out.
     // MUST free mem
     free_rfc5444_pkt(new_rfc_pkt);
