@@ -32,19 +32,13 @@
 #include "espnow_olsr.h"
 #include "libs/olsr_handlers.h"
 
-#define ESPNOW_MAX_DATA_LEN        (250)
-#define ESPNOW_MAX_PAYLOAD_LEN     (ESPNOW_MAX_DATA_LEN - sizeof(espnow_olsr_frame_t)) // the length of payload part in one ESPNOW frame.
-#define ESPNOW_MAX_PKT_LEN         (ESPNOW_MAX_PAYLOAD_LEN * 16) // max supported len of a packet.
-
-#define xTIMER_PERIOD               (1000 / portTICK_PERIOD_MS)
-
 static const char *TAG = "espnow_event_loop";
 
 static xQueueHandle s_espnow_olsr_queue;
 
 static uint32_t timer_tick_count = 0;
 
-static uint8_t espnow_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+static uint8_t espnow_broadcast_mac[RFC5444_ADDR_LEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 static uint16_t s_espnow_olsr_seq = 0;
 
 static void espnow_olsr_deinit();
@@ -70,7 +64,7 @@ static void example_wifi_init(void)
     ESP_LOGI(TAG, "New max tx power =%d * 0.25dbm", power);
 
     /*set the rate*/
-    ESP_ERROR_CHECK( esp_wifi_internal_set_fix_rate(ESP_IF_WIFI_STA, true, WIFI_PHY_RATE_MCS7_SGI) );
+    ESP_ERROR_CHECK( esp_wifi_internal_set_fix_rate(ESPNOW_WIFI_IF, true, WIFI_PHY_RATE_MCS7_SGI) );
 }
 
 /* ESPNOW sending or receiving callback function is called in WiFi task.
@@ -189,6 +183,7 @@ static void espnow_olsr_task(void *pvParameter)
         espnow_olsr_deinit();
         vTaskDelete(NULL);
     }
+    memset(local_frame, 0, ESPNOW_MAX_DATA_LEN);
     /* Initialize an empty packet to hold data for recv buf  */
     recv_pkt_buf = malloc(ESPNOW_MAX_PKT_LEN);
     if (recv_pkt_buf == NULL) {
@@ -197,6 +192,7 @@ static void espnow_olsr_task(void *pvParameter)
         espnow_olsr_deinit();
         vTaskDelete(NULL);
     }
+    memset(recv_pkt_buf, 0, ESPNOW_MAX_PKT_LEN);
 
 
     // espnow event loop, should loop forever.
@@ -377,30 +373,38 @@ static void espnow_timer_cb( TimerHandle_t xExpiredTimer )
     timer_tick_count ++;
     ESP_LOGI(TAG, "timer tick = %d", timer_tick_count);
 
-    // If this callback has executed the required number of times, stop the
-    // timer.
-    if( timer_tick_count == 100 )
-    {
-        // This is called from a timer callback so must not block.
-        xTimerStop( xExpiredTimer, 0 );
-    }
-
-    // push a fake packet
-    raw_pkt_t recv_pkt;
-    recv_pkt.pkt_len = 555;
-    // this will be freeed by event loop.
-    recv_pkt.pkt_data = malloc(recv_pkt.pkt_len);
-    if (recv_pkt.pkt_data == NULL) {
-        ESP_LOGE(TAG, "packet alloc error!");
-        return;
-    }
-    espnow_olsr_event_t evt;
-    evt.id = ESPNOW_OLSR_SEND_TO;
-    evt.info.send_to.pkt = recv_pkt;
+    espnow_olsr_event_t evt = olsr_timer_handler(timer_tick_count);
     // push to queue
     if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGW(TAG, "Send receive queue fail");
+        ESP_LOGE(TAG, "Timer send evt to queue fail!");
+        return;
     }
+
+    /* legacy test code */
+    // If this callback has executed the required number of times, stop the
+    // timer.
+    // if( timer_tick_count == 100 )
+    // {
+    //     // This is called from a timer callback so must not block.
+    //     xTimerStop( xExpiredTimer, 0 );
+    // }
+
+    // // push a fake packet
+    // raw_pkt_t recv_pkt;
+    // recv_pkt.pkt_len = 555;
+    // // this will be freeed by event loop.
+    // recv_pkt.pkt_data = malloc(recv_pkt.pkt_len);
+    // if (recv_pkt.pkt_data == NULL) {
+    //     ESP_LOGE(TAG, "packet alloc error!");
+    //     return;
+    // }
+    // espnow_olsr_event_t evt;
+    // evt.id = ESPNOW_OLSR_SEND_TO;
+    // evt.info.send_to.pkt = recv_pkt;
+    // // push to queue
+    // if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
+    //     ESP_LOGW(TAG, "Send receive queue fail");
+    // }
 }
 
 static esp_err_t espnow_olsr_init(void)
@@ -436,8 +440,14 @@ static esp_err_t espnow_olsr_init(void)
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
     free(peer);
 
+    // ==== init info base ====
+    uint8_t my_mac[RFC5444_ADDR_LEN];
+    ESP_ERROR_CHECK( esp_wifi_get_mac(ESPNOW_WIFI_IF, my_mac) );
+    info_base_init(my_mac); // pass local mac addr
+
+    // ==== start a task for OLSR event loop ====
     xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
-    // set up a freeRTOS timer to send out packets.
+    // ==== set up a freeRTOS timer to send out packets. ====
     TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
                                  xTIMER_PERIOD,     // The period of the timer in ticks.
                                  pdTRUE,           // This is an auto-reload timer.

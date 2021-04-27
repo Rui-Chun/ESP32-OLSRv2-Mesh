@@ -12,6 +12,7 @@
 
 #include "esp_now.h"
 #include "libs/rfc5444.h"
+#include "libs/info_base.h"
 
 /* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
 #if CONFIG_ESPNOW_WIFI_MODE_STATION
@@ -24,7 +25,12 @@
 
 #define ESPNOW_QUEUE_SIZE           16
 
-#define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
+#define ESPNOW_MAX_DATA_LEN        (250)
+#define ESPNOW_MAX_PAYLOAD_LEN     (ESPNOW_MAX_DATA_LEN - sizeof(espnow_olsr_frame_t)) // the length of payload part in one ESPNOW frame.
+#define ESPNOW_MAX_PKT_LEN         (ESPNOW_MAX_PAYLOAD_LEN * 16) // max supported len of a packet.
+
+// the period of timer (ms)
+#define xTIMER_PERIOD               (1000 / portTICK_PERIOD_MS) // 1000 ms
 
 typedef enum {
     ESPNOW_OLSR_SEND_CB,
@@ -35,18 +41,18 @@ typedef enum {
 } espnow_olsr_event_id_t;
 
 typedef struct {
-    uint8_t mac_addr[ESP_NOW_ETH_ALEN];
+    uint8_t mac_addr[RFC5444_ADDR_LEN];
     esp_now_send_status_t status;
 } espnow_olsr_event_send_cb_t;
 
 typedef struct {
-    uint8_t mac_addr[ESP_NOW_ETH_ALEN];
+    uint8_t mac_addr[RFC5444_ADDR_LEN];
     uint8_t *data;
     int data_len;
 } espnow_olsr_event_recv_cb_t;
 
 typedef struct {
-    // uint8_t dest_addr[ESP_NOW_ETH_ALEN]; // we always broadcast
+    // uint8_t dest_addr[RFC5444_ADDR_LEN]; // we always broadcast
     raw_pkt_t pkt;
 } espnow_olsr_event_send_to_t;
 
