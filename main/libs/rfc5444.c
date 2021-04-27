@@ -202,11 +202,23 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
     // only copy mem from raw_packet, do not free it. Event loop will reuse it.
     assert(raw_packet.pkt_len >= 2);
     rfc5444_pkt_t ret_pkt;
+    // assign values 0x0
+    memset((void*)(&ret_pkt), 0, sizeof(rfc5444_pkt_t));
     uint8_t* raw_pkt_ptr = raw_packet.pkt_data;
     uint16_t pkt_offset = 0;
     ret_pkt.version = raw_pkt_ptr[0];
-    ret_pkt.version = raw_pkt_ptr[1];
-    pkt_offset += 2;
+    ret_pkt.pkt_flags = raw_pkt_ptr[1];
+    ret_pkt.pkt_len = *((uint16_t*)(raw_pkt_ptr + 2));
+    ESP_LOGI(TAG, "Got pkt_len = %d", ret_pkt.pkt_len);
+    pkt_offset += RFC5444_PKT_HEADER_LEN;
+
+    // if it is unknown packet. return.
+    if (ret_pkt.version != 0) {
+        ESP_LOGW(TAG, "Unknown raw packet type!");
+        ret_pkt.version = 0;
+        ret_pkt.pkt_flags = 0;
+        return ret_pkt;
+    }
 
     // get msg_type
     // TODO: we only consider one msg in a packet for now.
@@ -228,7 +240,7 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
             break;
         }
         default: {
-            ESP_LOGW(TAG, "Unknown mse type!");
+            ESP_LOGW(TAG, "Unknown msg type = %d !", raw_pkt_ptr[pkt_offset]);
             break;
         }
     }
@@ -237,7 +249,7 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
 }
 
 // rfc5444_pkt should come form info base.
-// this function will consume rfc5444 pkt. 
+// this function will not consume rfc5444 pkt. remember free it!
 // the caller must check the raw_pkt.pkt_data field is not NULL!
 raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt) {
     raw_pkt_t ret_pkt;
@@ -248,7 +260,6 @@ raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt) {
     ret_pkt.pkt_data = malloc(rfc5444_pkt.pkt_len);
     if (ret_pkt.pkt_data == NULL) {
         ESP_LOGE(TAG, "No mem for new paket!");
-        free_rfc5444_pkt(rfc5444_pkt);
         return ret_pkt; // return a NULL packet.
     }
     memset(ret_pkt.pkt_data, 0, rfc5444_pkt.pkt_len);
@@ -280,9 +291,8 @@ raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt) {
     }
 
     // check pkt offset to make sure pkt len is correct.
+    ESP_LOGI(TAG, "offset = %d, len = %d", pkt_offset, ret_pkt.pkt_len);
     assert(pkt_offset == ret_pkt.pkt_len);
-    // MUST free rfc5444_pkt
-    free_rfc5444_pkt(rfc5444_pkt);
 
     return ret_pkt;
 }

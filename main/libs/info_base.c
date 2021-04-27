@@ -39,6 +39,7 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
 
 void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     // TODO:
+    ESP_LOGI(TAG, "Start to parse HELLO msg.");
 
 }
 

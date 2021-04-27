@@ -255,7 +255,7 @@ static void espnow_olsr_task(void *pvParameter)
             {
                 espnow_olsr_event_recv_cb_t *recv_cb_info = &evt.info.recv_cb;
                 assert(recv_cb_info != NULL);
-                ESP_LOGI(TAG, "Handling SEND_TO event");
+                ESP_LOGI(TAG, "Handling RECV_CB event");
 
                 if (espnow_olsr_data_check(recv_cb_info->data, recv_cb_info->data_len) < 0 ) {
                     ESP_LOGE(TAG, "Recv data check failed. len = %d", recv_cb_info->data_len);
@@ -446,7 +446,7 @@ static esp_err_t espnow_olsr_init(void)
     info_base_init(my_mac); // pass local mac addr
 
     // ==== start a task for OLSR event loop ====
-    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
+    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 8192, NULL, 4, NULL);
     // ==== set up a freeRTOS timer to send out packets. ====
     TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
                                  xTIMER_PERIOD,     // The period of the timer in ticks.

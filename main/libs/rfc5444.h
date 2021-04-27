@@ -106,12 +106,13 @@ typedef struct tc_msg_t {
 //     tc_msg_t* tc_msg_ptr;
 // } rfc5444_msg_ptr;
 
+#define RFC5444_PKT_HEADER_LEN 4
 typedef struct rfc5444_pkt_t {
     // packet header
     // just use a byte to hold 4-bit field to keep things simple ...
     uint8_t version;    // 4-bit unsigned integer field, version 0
     uint8_t pkt_flags;  // 4-bit field, bit 0 (pkt has seq_num), bit 1 (pkt has tlv).
-    uint16_t pkt_len;   // pkt length, not in rfc5444, added for convenience.
+    uint16_t pkt_len;   // length of the whole packet, not in rfc5444, added for convenience.
     // rfc5444_msg_ptr msg_list[RFC5444_MAX_MSG_NUM]; // list of ptr to the msg
     hello_msg_t* hello_msg_ptr;
     tc_msg_t* tc_msg_ptr;
@@ -119,7 +120,7 @@ typedef struct rfc5444_pkt_t {
 
 
 /* exported functions */
-uint8_t cal_tlv_len(tlv_type);
+uint8_t cal_tlv_len(tlv_type_t);
 uint16_t get_tlv_block_len (tlv_block_t* tlv_block);
 uint16_t get_addr_block_len (addr_block_t* addr_block_ptr);
 void free_rfc5444_pkt(rfc5444_pkt_t);

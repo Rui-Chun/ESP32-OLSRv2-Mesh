@@ -15,12 +15,15 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
     // TODO: logic here
     // parse raw packet
     recv_rfc_pkt = parse_raw_packet(recv_pkt);
-    // handle possible HELLO msg
+
+    // 1. handle possible HELLO msg
     if (recv_rfc_pkt.hello_msg_ptr != NULL) {
         // update info base given hello msg
         parse_hello_msg(recv_rfc_pkt.hello_msg_ptr);
+        // only update, no event scheduled.
     }
 
+    // TODO: 2. handle possible TC msg
 
     // MUST free all mem
     free_rfc5444_pkt(recv_rfc_pkt);
@@ -31,10 +34,14 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
 espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     espnow_olsr_event_t ret_evt;
     ret_evt.id = ESPNOW_OLSR_NO_OP;
+    raw_pkt_t new_raw_pkt;
     rfc5444_pkt_t new_rfc_pkt;
     // set values to 0x0
     memset((void*)(&new_rfc_pkt), 0, sizeof(rfc5444_pkt_t));
+    new_rfc_pkt.pkt_len = RFC5444_PKT_HEADER_LEN;
+
     ESP_LOGI(TAG, "Time tick #%d is up!", tick_num);
+
     // TODO: logic here
     // 1. send out possible hello msg
     if (tick_num % HELLO_INTERVAL_TICKS == 0) {
@@ -45,12 +52,20 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
             return ret_evt;
         }
         memset(new_rfc_pkt.hello_msg_ptr, 0, sizeof(hello_msg_t));
+        // generate hello msg content
         gen_hello_msg(new_rfc_pkt.hello_msg_ptr);
+        new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.hello_msg_ptr->header.msg_size;
     }
-    
-    // TODO: gen raw pkt and send to event
-    
+
+    // gen raw pkt and send to event
+    if(new_rfc_pkt.pkt_len > 0) {
+        new_raw_pkt = gen_raw_packet(new_rfc_pkt);
+        assert(new_raw_pkt.pkt_data != NULL);
+        ret_evt.id = ESPNOW_OLSR_SEND_TO;
+        ret_evt.info.send_to.pkt = new_raw_pkt;
+    }
     // TODO: update info base if time out.
+
     // MUST free mem
     free_rfc5444_pkt(new_rfc_pkt);
     return ret_evt;
