@@ -9,7 +9,7 @@
 
 #ifndef ESPNOW_OLSR_H
 #define ESPNOW_OLSR_H
-
+#include "esp_log.h"
 #include "esp_now.h"
 #include "libs/rfc5444.h"
 #include "libs/info_base.h"

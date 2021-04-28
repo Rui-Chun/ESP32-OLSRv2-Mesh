@@ -197,6 +197,8 @@ static void espnow_olsr_task(void *pvParameter)
 
     // espnow event loop, should loop forever.
     while (xQueueReceive(s_espnow_olsr_queue, &evt, portMAX_DELAY) == pdTRUE) {
+        // ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
+        // ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
         switch (evt.id) {
             // a packet need to be sent, most likely we need send multiple frames
             case ESPNOW_OLSR_SEND_TO:
@@ -446,7 +448,7 @@ static esp_err_t espnow_olsr_init(void)
     info_base_init(my_mac); // pass local mac addr
 
     // ==== start a task for OLSR event loop ====
-    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 8192, NULL, 4, NULL);
+    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 12288, NULL, 4, NULL);
     // ==== set up a freeRTOS timer to send out packets. ====
     TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
                                  xTIMER_PERIOD,     // The period of the timer in ticks.

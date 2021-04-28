@@ -8,6 +8,23 @@ uint8_t get_tlv_len (tlv_t* tlv_ptr) {
     return sizeof(tlv_t) + tlv_ptr->tlv_value_len;
 }
 
+// get the specific type of value in the tlv block, return value len.
+// use a pointer of pointer to pass the pointer to the value.
+uint8_t get_tlv_value (tlv_block_t* tlv_block_ptr, tlv_type_t tt, uint8_t** buf_pp) {
+    if(tlv_block_ptr == NULL) {
+        return 0;
+    }
+    tlv_t* tlv_ptr = NULL;
+    for (int t=0; t < tlv_block_ptr->tlv_ptr_len; t++) {
+        tlv_ptr = tlv_block_ptr->tlv_ptr_list[t];
+        if(tlv_ptr->tlv_type == tt) {
+            *buf_pp = tlv_ptr->tlv_value;
+            return tlv_ptr->tlv_value_len;
+        }
+    }
+    return 0;
+}
+
 uint8_t cal_tlv_len (tlv_type_t type) {
     switch (type) {
         case VALIDITY_TIME: {

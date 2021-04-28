@@ -122,6 +122,7 @@ typedef struct rfc5444_pkt_t {
 
 /* exported functions */
 uint8_t cal_tlv_len(tlv_type_t);
+uint8_t get_tlv_value (tlv_block_t* tlv_block_ptr, tlv_type_t tt, uint8_t** buf_pp);
 uint16_t get_tlv_block_len (tlv_block_t* tlv_block);
 uint16_t get_addr_block_len (addr_block_t* addr_block_ptr);
 void free_rfc5444_pkt(rfc5444_pkt_t);

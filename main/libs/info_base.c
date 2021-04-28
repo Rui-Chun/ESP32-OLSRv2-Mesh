@@ -7,6 +7,11 @@ static const char *TAG = "espnow_info_base";
 // message seq num, to indicate a new msg
 static uint32_t global_msg_seq_num = 0;
 
+static uint32_t glocal_tick_num = 0; // time counter based on tick
+
+// do not use #0, use [1, peer_num]
+static uint8_t peer_num = 0; // 255 should be enough.
+
 // a static list for all peer nodes' addresses.
 // Note: We use peer_id #0 to mark empty!
 static uint8_t peer_addr_list[MAX_PEER_NUM][RFC5444_ADDR_LEN]; // use peer_id to get mac address.
@@ -14,7 +19,9 @@ static void* entry_ptr_list[MAX_PEER_NUM];
 
 // Neighbor Information Base
 // info is stored in entries, get it from entry ptr list.
+static uint8_t neighbor_id_num = 0;
 static uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM];
+static uint8_t two_hop_id_num = 0;
 static uint8_t two_hop_id_list[MAX_PEER_NUM];
 
 // Topology Information Base
@@ -22,6 +29,7 @@ static uint8_t two_hop_id_list[MAX_PEER_NUM];
 // 1. A Routable Address Topology Set
 // 2. A Router Topology Set, recording links between routers in the MANET
 // 3. A Routing Set, recording routes from this router to all available destinations.
+static uint8_t remote_id_num = 0;
 static uint8_t remote_id_list[MAX_PEER_NUM];
 // TODO: 
 // 3. An Attached Network Set, recording a gateway
@@ -34,21 +42,149 @@ static uint8_t originator_addr[RFC5444_ADDR_LEN];
 
 /* Helper functions */
 
+// search for the addr in the peer list, (if not existing, append one) and assign the peer_id.
+// return 1 if already in list, else 0.
+uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id) {
+    for(int p = 1; p <= peer_num; p++) { // do not use #0, use [1, peer_num]
+        if (memcmp(peer_addr_list[p], mac_addr, RFC5444_ADDR_LEN) == 0) {
+            // a match in the list.
+            *peer_id = p;
+            return 1;
+        }
+    }
+    // if no match, append the list
+    memcpy(peer_addr_list[++peer_num], mac_addr, RFC5444_ADDR_LEN);
+    *peer_id = peer_num;
+    return 0;
+
+}
+
+// register a new neighbor struct into the entry_ptr_list and neighbor_id_list
+neighbor_entry_t* register_new_neighbor(uint8_t new_neighbor_id) {
+    if (new_neighbor_id == 0 ) {
+        ESP_LOGW(TAG, "Do not register peer #0!");
+        return NULL;
+    }
+    // must be unregistered
+    assert(entry_ptr_list[new_neighbor_id] == NULL);
+    neighbor_entry_t* ret_entry = calloc(1, sizeof(neighbor_entry_t)); // set to zeros
+    if(ret_entry == NULL) {
+        ESP_LOGE(TAG, "No mem for a new neighbor entry.");
+        return NULL;
+    }
+    // init neighbor entry
+    ret_entry->entry_type = NEIGHBOR_ENTRY;
+    ret_entry->peer_id = new_neighbor_id;
+    ret_entry->link_status = LINK_HEARD; // this maybe useless
+    // register the entry to the entry list
+    entry_ptr_list[new_neighbor_id] = ret_entry;
+
+    return ret_entry;
+}
+
+// loop over the entry list to count the number of neighbor entries.
+void update_id_lists() {
+    neighbor_id_num = 0;
+    two_hop_id_num = 0;
+    remote_id_num = 0;
+
+    for(int p=1; p <= peer_num; p++) { // do not use #0
+        assert(entry_ptr_list[p] != NULL);
+        switch ( ((uint8_t*)entry_ptr_list[p])[0] ) {
+            case NEIGHBOR_ENTRY: {
+                neighbor_id_list[neighbor_id_num++] = p;
+                break;
+            }
+            case TWO_HOP_ENTRY: {
+                two_hop_id_list[two_hop_id_num++] = p;
+                break;
+            }
+            case REMOTE_NODE_ENTRY: {
+                remote_id_list[remote_id_num++] = p;
+                break;
+            }
+            default: {
+                ESP_LOGE(TAG, "Unknown entry type!");
+            }
+        }
+    }
+    return;
+}
 
 
 /* Worker functions */
+
+void set_info_base_time (uint32_t tick) {
+    glocal_tick_num = tick;
+}
+
 void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
     memcpy(originator_addr, mac, RFC5444_ADDR_LEN);
     ESP_LOGI(TAG, "init done, mac addr =  "MACSTR".", MAC2STR(originator_addr));
 }
 
+void gen_hello_link_info(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* hello_msg_ptr) {
+    // TODO:
+
+}
+
 void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     // TODO: update info bases based on HELLO
     ESP_LOGI(TAG, "Start to parse HELLO msg.");
+    // get msg originator address.
+    uint8_t neighbor_id = 0;
+    neighbor_entry_t* hello_neighbor_entry = NULL;
+    uint8_t* hello_orig_addr = hello_msg_ptr->header.msg_orig_addr;
 
-    // 1. update N1_recv, nodes that I can hear
+    // 1. check and update peer_list and entry_list
+    if (get_or_create_id(hello_orig_addr, &neighbor_id)) {
+        // if this node has already been stored
+        uint8_t* unknown_entry = entry_ptr_list[neighbor_id];
+        // check the current entry type
+        switch (unknown_entry[0]) {
+            case NEIGHBOR_ENTRY: {
+                ESP_LOGI(TAG, "Hello msg is from a familiar neighbor node!");
+                hello_neighbor_entry = (neighbor_entry_t*) unknown_entry;
+                break;
+            }
+            case TWO_HOP_ENTRY: {
+                ESP_LOGI(TAG, "Hello msg is from a two-hop node?");
+                // TODO: handle node type switch
+                break;
+            }
+            case REMOTE_NODE_ENTRY: {
+                ESP_LOGI(TAG, "Hello msg is from a remote node?");
+                // TODO: handle node type switch
+                break;
+            }
+            default: {
+                ESP_LOGW(TAG, "An unknown entry type!");
+                break;
+            }
+        }
+    } else {
+        // a new peer node.
+        ESP_LOGI(TAG, "A new neighbor node is heard! addr = "MACSTR" .", MAC2STR(hello_orig_addr));
+        hello_neighbor_entry = register_new_neighbor(neighbor_id);
+    }
     
-    // 2. 
+    // 2. update entry, neighor and two hop entries
+    assert(hello_neighbor_entry->peer_id == neighbor_id);
+    if (hello_msg_ptr->header.msg_seq_num <= hello_neighbor_entry->msg_seq_num) {
+        ESP_LOGW(TAG, "Got an out-dated packet, drop it.");
+        return;
+    }
+    uint8_t* tmp_value_ptr = NULL;
+    assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, IS_MPR_WILLING, &tmp_value_ptr) == 1 );
+    hello_neighbor_entry->is_mpr_willing = *tmp_value_ptr;
+    assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, VALIDITY_TIME, &tmp_value_ptr) == 1 );
+    hello_neighbor_entry->valid_until =  glocal_tick_num + *tmp_value_ptr;
+    
+    // update link info
+    gen_hello_link_info(hello_neighbor_entry, hello_msg_ptr);
+
+    // update id_lists
+    update_id_lists();
 }
 
 void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
@@ -128,7 +264,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     ESP_LOGI(TAG, "Msg with tlv block, len = %d", header_ptr->msg_size);
 
     // 2. addr block, put in all neighbors.
-    uint16_t neighbor_num = strlen((char*)neighbor_id_list); // consider it as str, stop until first non-zero
+    uint16_t neighbor_num = neighbor_id_num;
     ESP_LOGI(TAG, "neighbor_num = %d", neighbor_num);
     tmp_len = sizeof(addr_block_t) + neighbor_num * RFC5444_ADDR_LEN;
     hello_msg_ptr->addr_block_ptr = malloc(tmp_len);
@@ -239,4 +375,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     // calculate msg len!
     ESP_LOGI(TAG, "A new HELLO with len = %d", header_ptr->msg_size);
     // done.
+    ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
 }
+

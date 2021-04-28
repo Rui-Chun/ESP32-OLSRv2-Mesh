@@ -1,5 +1,3 @@
-#include "esp_log.h"
-
 #include "olsr_handlers.h"
 
 static const char *TAG = "espnow_olsr_handler";
@@ -31,6 +29,7 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
     return ret_evt;
 }
 
+// TODO: this is running at timer task !! Reorganize workflow! Do less work here !
 espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     espnow_olsr_event_t ret_evt;
     ret_evt.id = ESPNOW_OLSR_NO_OP;
@@ -41,6 +40,7 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     new_rfc_pkt.pkt_len = RFC5444_PKT_HEADER_LEN;
 
     ESP_LOGI(TAG, "Time tick #%d is up!", tick_num);
+    set_info_base_time (tick_num);
 
     // TODO: logic here
     // 1. send out possible hello msg
