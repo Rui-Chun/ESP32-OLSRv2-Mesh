@@ -36,6 +36,7 @@ typedef enum {
     ESPNOW_OLSR_SEND_CB,
     ESPNOW_OLSR_RECV_CB,
     ESPNOW_OLSR_SEND_TO,   // to send a packet
+    ESPNOW_OLSR_TIMER_CB,
     ESPNOW_OLSR_NO_OP,     // to indicate no op is needed.
     ESPNOW_OLSR_UNDEFINE,
 } espnow_olsr_event_id_t;
@@ -56,10 +57,15 @@ typedef struct {
     raw_pkt_t pkt;
 } espnow_olsr_event_send_to_t;
 
+typedef struct {
+    uint32_t timer_tick;
+} espnow_olsr_event_timer_cb_t;
+
 typedef union {
     espnow_olsr_event_send_cb_t send_cb;
     espnow_olsr_event_recv_cb_t recv_cb;
     espnow_olsr_event_send_to_t send_to;
+    espnow_olsr_event_timer_cb_t timer_cb;
 } espnow_olsr_event_info_t;
 
 /* When ESPNOW sending or receiving callback function is called, post event to ESPNOW task. */

@@ -36,8 +36,6 @@ static const char *TAG = "espnow_event_loop";
 
 static xQueueHandle s_espnow_olsr_queue;
 
-static uint32_t timer_tick_count = 0;
-
 static uint8_t espnow_broadcast_mac[RFC5444_ADDR_LEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 static uint16_t s_espnow_olsr_seq = 0;
 
@@ -173,7 +171,7 @@ static void espnow_olsr_task(void *pvParameter)
     espnow_olsr_event_t ret_evt;
     
     // why wait? this is from the example code.
-    vTaskDelay(1000 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_RATE_MS);
     ESP_LOGI(TAG, "ESPNOW event loop starts");
 
     /* Initialize an empty frame to hold data for local use  */
@@ -197,8 +195,8 @@ static void espnow_olsr_task(void *pvParameter)
 
     // espnow event loop, should loop forever.
     while (xQueueReceive(s_espnow_olsr_queue, &evt, portMAX_DELAY) == pdTRUE) {
-        // ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
-        // ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
+        ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
+        ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
         switch (evt.id) {
             // a packet need to be sent, most likely we need send multiple frames
             case ESPNOW_OLSR_SEND_TO:
@@ -352,6 +350,18 @@ static void espnow_olsr_task(void *pvParameter)
                 free(recv_frame); // MUST free data! this is allocated in recv_cb
                 break;
             }
+            case ESPNOW_OLSR_TIMER_CB:
+            {
+                ESP_LOGI(TAG, "Handling TIMER CB event.");
+                // call olsr handler
+                ret_evt = olsr_timer_handler(evt.info.timer_cb.timer_tick);
+                // push the return event to queue
+                if (xQueueSend(s_espnow_olsr_queue, &ret_evt, portMAX_DELAY) != pdTRUE) {
+                    ESP_LOGE(TAG, "Timer send evt to queue fail!");
+                    return;
+                }
+                break;
+            }
             case ESPNOW_OLSR_NO_OP: {
                 ESP_LOGI(TAG, "NO OP event called.");
                 break;
@@ -370,12 +380,15 @@ static void espnow_olsr_task(void *pvParameter)
 
 static void espnow_timer_cb( TimerHandle_t xExpiredTimer )
 {
-
+    static uint32_t timer_tick_count = 0;
     // Increment the variable to show the timer callback has executed.
     timer_tick_count ++;
     ESP_LOGI(TAG, "timer tick = %d", timer_tick_count);
 
-    espnow_olsr_event_t evt = olsr_timer_handler(timer_tick_count);
+    // send TIMER_CB event, let the event loop do the heavy work.
+    espnow_olsr_event_t evt;
+    evt.id = ESPNOW_OLSR_TIMER_CB;
+    evt.info.timer_cb.timer_tick = timer_tick_count;
     // push to queue
     if (xQueueSend(s_espnow_olsr_queue, &evt, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(TAG, "Timer send evt to queue fail!");
@@ -448,7 +461,7 @@ static esp_err_t espnow_olsr_init(void)
     info_base_init(my_mac); // pass local mac addr
 
     // ==== start a task for OLSR event loop ====
-    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 12288, NULL, 4, NULL);
+    xTaskCreate(espnow_olsr_task, "espnow_olsr_task", 4096, NULL, 4, NULL);
     // ==== set up a freeRTOS timer to send out packets. ====
     TimerHandle_t xTimer_h = xTimerCreate( "T1",             // Text name for the task.  Helps debugging only.  Not used by FreeRTOS.
                                  xTIMER_PERIOD,     // The period of the timer in ticks.

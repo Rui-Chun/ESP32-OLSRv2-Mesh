@@ -170,7 +170,7 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     
     // 2. update entry, neighor and two hop entries
     assert(hello_neighbor_entry->peer_id == neighbor_id);
-    if (hello_msg_ptr->header.msg_seq_num <= hello_neighbor_entry->msg_seq_num) {
+    if (hello_msg_ptr->header.msg_seq_num < hello_neighbor_entry->msg_seq_num) {
         ESP_LOGW(TAG, "Got an out-dated packet, drop it.");
         return;
     }
