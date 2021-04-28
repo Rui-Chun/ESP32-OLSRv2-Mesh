@@ -16,6 +16,9 @@ uint8_t cal_tlv_len (tlv_type_t type) {
         case INTERVAL_TIME: {
             return sizeof(tlv_t) + 1;
         }
+        case MPR_WILLING: {
+            return sizeof(tlv_t) + 1;
+        }
         default: {
             ESP_LOGW(TAG, "Unknown tlv type!");
             return 0;
@@ -44,6 +47,7 @@ uint16_t get_tlv_block_len (tlv_block_t* tlv_block) {
         ret_len += tlv_block->tlv_ptr_list[i]->tlv_value_len + sizeof(tlv_t);
     }
     // double check
+    ESP_LOGI(TAG, "ret_len = %d, tlv_block_len = %d", ret_len, sizeof(tlv_block_t) + tlv_block->tlv_block_size);
     assert(ret_len == sizeof(tlv_block_t) + tlv_block->tlv_block_size);
     return ret_len;
 }

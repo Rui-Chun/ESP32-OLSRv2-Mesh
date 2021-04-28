@@ -13,6 +13,10 @@
 
 #define HELLO_VALIDITY_TICKS 5
 #define HELLO_INTERVAL_TICKS 1
+#define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
+
+#define HELLO_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
+#define HELLO_ADDR_TLV_NUM    3  // number of TLV entries in addr_tlv_block
 /* Protocol Parameters and Constants End */
 
 #ifndef MAC2STR
@@ -28,19 +32,36 @@ typedef enum link_status_t {
     LOST,
 } link_status_t;
 
+typedef enum flooding_mpr_status_t {
+    NOT_FLOODING,                   // this node is not a flooding MPR
+    FLOODING_TO,                    // this node is local node's flooding MPR
+    FLOODING_FROM,                  // is flooding selector
+    FLOODING_TO_FROM,               // is flooding MPR and selector
+} flooding_mpr_status_t;
+
+typedef enum routing_mpr_status_t {
+    NOT_ROUTING,
+    ROUTING_TO,
+    ROUTING_FROM,
+    ROUTING_TO_FROM,
+} routing_mpr_status_t;
+
 typedef struct remote_node_entry_t {
     uint8_t peer_id;
     uint8_t routing_next_hop; // what is the next hop to get to the remote node
-    uint8_t is_routing_mpr;
-    uint8_t remote_neighbors[MAX_NEIGHBOUR_NUM]; // this is only useful when is_routing_mpr>0
-    uint8_t validity_time_left;
+    routing_mpr_status_t routing_status;
+    uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM]; // this is only useful when is_routing_mpr
+    uint32_t valid_until;
 } remote_node_entry_t;
 
 typedef struct two_hop_entry_t {
     uint8_t peer_id;
+    uint8_t routing_next_hop; // what is the next hop to get to the remote node
     link_status_t link_status;
     uint8_t link_metric;
-    uint8_t validity_time_left;
+    routing_mpr_status_t routing_status;
+    uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM]; // this is only useful when is_routing_mpr
+    uint32_t valid_until;
 }two_hop_entry_t;
 
 /* we only consider one interface, so Interface Information Base merges with Neighbor Information Base. */
@@ -49,13 +70,11 @@ typedef struct neighbor_entry_t {
     link_status_t link_status;
     uint8_t link_metric;
     uint8_t is_mpr_willing;
-    uint8_t is_flooding_mpr;
-    uint8_t is_routing_mpr;
-    uint8_t is_flooding_selector;
-    uint8_t is_routing_selector;
-    uint8_t validity_time_left; // TODO: a time counter to keep entry fresh.
+    flooding_mpr_status_t flooding_status;
+    routing_mpr_status_t routing_status;
+    uint32_t valid_until; // TODO: a time limit to keep entry fresh.
     // record associated two-hop nodes.
-    uint8_t associated_peer_ids[MAX_NEIGHBOUR_NUM]; 
+    uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM]; 
 } neighbor_entry_t;
 
 // TODO: info_base.c should only store and provide helper functions to operate on info bases.

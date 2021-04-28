@@ -32,23 +32,32 @@ static uint32_t seq_num_seen[MAX_PEER_NUM];
 // Local Information Base: Originator address
 static uint8_t originator_addr[RFC5444_ADDR_LEN];
 
+/* Helper functions */
+
+
+
+/* Worker functions */
 void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
     memcpy(originator_addr, mac, RFC5444_ADDR_LEN);
     ESP_LOGI(TAG, "init done, mac addr =  "MACSTR".", MAC2STR(originator_addr));
 }
 
 void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
-    // TODO:
+    // TODO: update info bases based on HELLO
     ESP_LOGI(TAG, "Start to parse HELLO msg.");
 
+    // 1. update N1_recv, nodes that I can hear
+    
+    // 2. 
 }
 
 void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
     msg_tlv_block_ptr->tlv_block_type = 0;
-    msg_tlv_block_ptr->tlv_ptr_len = 2;
+    msg_tlv_block_ptr->tlv_ptr_len = HELLO_MSG_TLV_NUM; // three tlv entries
     msg_tlv_block_ptr->tlv_block_size = 0;
 
     // assign tlv entries
+    // 1. VALIDITY_TIME
     msg_tlv_block_ptr->tlv_ptr_list[0] = malloc(cal_tlv_len(VALIDITY_TIME));
     if(msg_tlv_block_ptr->tlv_ptr_list[0] == NULL) {
         ESP_LOGE(TAG, "No mem for tlv block!");
@@ -60,6 +69,7 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
     msg_tlv_block_ptr->tlv_ptr_list[0]->tlv_value[0] = HELLO_VALIDITY_TICKS;
     msg_tlv_block_ptr->tlv_block_size += cal_tlv_len(VALIDITY_TIME);
 
+    // 2. INTERVAL_TIME
     msg_tlv_block_ptr->tlv_ptr_list[1] = malloc(cal_tlv_len(INTERVAL_TIME));
     if(msg_tlv_block_ptr->tlv_ptr_list[1] == NULL) {
         ESP_LOGE(TAG, "No mem for tlv block!");
@@ -69,8 +79,22 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
     }
     msg_tlv_block_ptr->tlv_ptr_list[1]->tlv_type = INTERVAL_TIME;
     msg_tlv_block_ptr->tlv_ptr_list[1]->tlv_value_len = 1;
-    msg_tlv_block_ptr->tlv_ptr_list[1]->tlv_value[1] = HELLO_INTERVAL_TICKS;
+    msg_tlv_block_ptr->tlv_ptr_list[1]->tlv_value[0] = HELLO_INTERVAL_TICKS;
     msg_tlv_block_ptr->tlv_block_size += cal_tlv_len(INTERVAL_TIME);
+
+    // 3. MPR_WILLING
+    msg_tlv_block_ptr->tlv_ptr_list[2] = malloc(cal_tlv_len(MPR_WILLING));
+    if(msg_tlv_block_ptr->tlv_ptr_list[2] == NULL) {
+        ESP_LOGE(TAG, "No mem for tlv block!");
+        free(msg_tlv_block_ptr->tlv_ptr_list[0]);
+        free(msg_tlv_block_ptr->tlv_ptr_list[1]);
+        free(msg_tlv_block_ptr);
+        return;
+    }
+    msg_tlv_block_ptr->tlv_ptr_list[2]->tlv_type = MPR_WILLING;
+    msg_tlv_block_ptr->tlv_ptr_list[2]->tlv_value_len = 1;
+    msg_tlv_block_ptr->tlv_ptr_list[2]->tlv_value[0] = IS_MPR_WILLING;
+    msg_tlv_block_ptr->tlv_block_size += cal_tlv_len(MPR_WILLING);
 
     return;
 }
@@ -93,7 +117,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
 
     // alloc and set mem for blocks
     // 1. msg tlv block, validity time and interval time.
-    uint16_t tmp_len = sizeof(tlv_block_t) + 2 * sizeof(tlv_t*); // two pointers.
+    uint16_t tmp_len = sizeof(tlv_block_t) + HELLO_MSG_TLV_NUM * sizeof(tlv_t*); // three pointers.
     hello_msg_ptr->msg_tlv_block_ptr = malloc(tmp_len);
     if(hello_msg_ptr->msg_tlv_block_ptr == NULL) {
         ESP_LOGE(TAG, "No mem for tlv block!");
@@ -124,7 +148,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     ESP_LOGI(TAG, "Msg with addr block, len = %d", header_ptr->msg_size);
 
     // 3. addr tlv block.
-    tmp_len = sizeof(tlv_block_t) + sizeof(tlv_t*); // one tlv ptr
+    tmp_len = sizeof(tlv_block_t) + sizeof(tlv_t*) * HELLO_ADDR_TLV_NUM ; // three tlv entry pointers!
     hello_msg_ptr->addr_tlv_block_ptr = malloc(tmp_len);
     if(hello_msg_ptr->addr_tlv_block_ptr == NULL) {
         ESP_LOGE(TAG, "No mem for addr tlv block!");
@@ -136,14 +160,14 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     }
     // one addr tlv entry -> LINK_STATUS
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_type = 0;
-    hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_len = 1; // one tlv entry
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_len = HELLO_ADDR_TLV_NUM; // three tlv entry
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size = 0; // to be updated.
-
+    // (1) LINK_STATUS TLV
     tmp_len = sizeof(tlv_t) + neighbor_num;
     hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0] = malloc(tmp_len);
     tlv_t* tmp_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0];
     if(tmp_tlv_ptr == NULL) {
-        ESP_LOGE(TAG, "No mem for addr tlv entry!");
+        ESP_LOGE(TAG, "No mem for addr tlv 0 entry!");
         free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[0]);
         free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[1]);
         free(hello_msg_ptr->msg_tlv_block_ptr);
@@ -151,14 +175,67 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
         free(hello_msg_ptr->addr_tlv_block_ptr);
         return;
     }
-    hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
-    tmp_tlv_ptr->tlv_type = LINK_STATUS; // TODO: change this type to include more link info!
+    tmp_tlv_ptr->tlv_type = LINK_STATUS;
     tmp_tlv_ptr->tlv_value_len = neighbor_num;
     for(int n=0; n < neighbor_num; n++) {
         neighbor_entry_t* neighbor_entry_ptr = entry_ptr_list[neighbor_id_list[n]];
-        tmp_tlv_ptr->tlv_value[n] = neighbor_entry_ptr->link_status;
+        tmp_tlv_ptr->tlv_value[n] = neighbor_entry_ptr->link_status; // assign link status values
     }
+    // udpate block size
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
+
+    // (2) LINK_METRIC TLV
+    tmp_len = sizeof(tlv_t) + neighbor_num;
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1] = malloc(tmp_len);
+    tmp_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1];
+    if(tmp_tlv_ptr == NULL) {
+        ESP_LOGE(TAG, "No mem for addr tlv 1 entry!");
+        free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[0]);
+        free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[1]);
+        free(hello_msg_ptr->msg_tlv_block_ptr);
+        free(hello_msg_ptr->addr_block_ptr);
+        free(hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0]);
+        free(hello_msg_ptr->addr_tlv_block_ptr);
+        return;
+    }
+    tmp_tlv_ptr->tlv_type = LINK_METRIC;
+    tmp_tlv_ptr->tlv_value_len = neighbor_num;
+    for(int n=0; n < neighbor_num; n++) {
+        neighbor_entry_t* neighbor_entry_ptr = entry_ptr_list[neighbor_id_list[n]];
+        tmp_tlv_ptr->tlv_value[n] = neighbor_entry_ptr->link_metric; // assign link metric values
+    }
+    // udpate block size
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
+
+    // (3) MPR_STATUS
+    tmp_len = sizeof(tlv_t) + neighbor_num * 2; // 2 bytes for each neighbor
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2] = malloc(tmp_len);
+    tmp_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2];
+    if(tmp_tlv_ptr == NULL) {
+        ESP_LOGE(TAG, "No mem for addr tlv 1 entry!");
+        free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[0]);
+        free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[1]);
+        free(hello_msg_ptr->msg_tlv_block_ptr);
+        free(hello_msg_ptr->addr_block_ptr);
+        free(hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0]);
+        free(hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1]);
+        free(hello_msg_ptr->addr_tlv_block_ptr);
+        return;
+    }
+    tmp_tlv_ptr->tlv_type = MPR_STATUS;
+    tmp_tlv_ptr->tlv_value_len = neighbor_num * 2;
+    for(int n=0; n < neighbor_num; n++) {
+        neighbor_entry_t* neighbor_entry_ptr = entry_ptr_list[neighbor_id_list[n]];
+        // assign MPR status values, both flooding and routing MPR status
+        tmp_tlv_ptr->tlv_value[n*2] = neighbor_entry_ptr->flooding_status;
+        tmp_tlv_ptr->tlv_value[n*2 + 1] = neighbor_entry_ptr->routing_status;
+    }
+    // udpate block size
+    hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
+   
+    // update msg size given the addr tlv block
     header_ptr->msg_size += get_tlv_block_len(hello_msg_ptr->addr_tlv_block_ptr);
+
     // calculate msg len!
     ESP_LOGI(TAG, "A new HELLO with len = %d", header_ptr->msg_size);
     // done.

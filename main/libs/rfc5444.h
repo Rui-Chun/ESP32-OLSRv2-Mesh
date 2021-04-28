@@ -56,6 +56,7 @@ typedef enum tlv_type_t {
     MPR_WILLING,
     LINK_STATUS, // TODO: combine multiple statistic
     LINK_METRIC,
+    MPR_STATUS,
 } tlv_type_t;
 
 // TODO
