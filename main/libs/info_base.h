@@ -66,9 +66,9 @@ typedef struct remote_node_entry_t {
     uint8_t entry_type;
     uint8_t peer_id;
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
+    uint32_t valid_until;
     uint8_t routing_next_hop; // what is the next hop to get to the remote node
     routing_mpr_status_t routing_status;
-    uint32_t valid_until;
     link_info_t link_info;
 } remote_node_entry_t;
 
@@ -77,9 +77,9 @@ typedef struct two_hop_entry_t {
     uint8_t entry_type;
     uint8_t peer_id;
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
+    uint32_t valid_until;
     uint8_t routing_next_hop; // what is the next hop to get to the remote node
     routing_mpr_status_t routing_status;
-    uint32_t valid_until;
     link_info_t link_info;
 }two_hop_entry_t;
 
@@ -88,12 +88,12 @@ typedef struct neighbor_entry_t {
     uint8_t entry_type;
     uint8_t peer_id; // used to index peer mac addr list.
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
+    uint32_t valid_until;
     link_status_t link_status;
     uint8_t link_metric;  // TODO: enable link metric.
     uint8_t is_mpr_willing;
     flooding_mpr_status_t flooding_status;
     routing_mpr_status_t routing_status;
-    uint32_t valid_until; // TODO: a time limit to keep entry fresh.
     link_info_t link_info;
 } neighbor_entry_t;
 

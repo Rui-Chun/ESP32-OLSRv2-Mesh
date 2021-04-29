@@ -7,9 +7,10 @@ static const char *TAG = "espnow_info_base";
 // message seq num, to indicate a new msg
 static uint32_t global_msg_seq_num = 0;
 
-static uint32_t glocal_tick_num = 0; // time counter based on tick
+static uint32_t global_tick_num = 0; // time counter based on tick
 
 // do not use #0, use [1, peer_num]
+// for example, 'for(int n=1; n <= peer_num; n++)'
 static uint8_t peer_num = 0; // 255 should be enough.
 
 // a static list for all peer nodes' addresses.
@@ -49,6 +50,11 @@ uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id) 
         if (memcmp(peer_addr_list[p], mac_addr, RFC5444_ADDR_LEN) == 0) {
             // a match in the list.
             *peer_id = p;
+            if (entry_ptr_list[p] == NULL) {
+                // if this node was deleted before.
+                return 0; // register it agagin.
+            }
+            // do not need alloc new entry
             return 1;
         }
     }
@@ -91,7 +97,7 @@ two_hop_entry_t* register_new_two_hop(uint8_t new_two_hop_id) {
     }
     // must be unregistered
     assert(entry_ptr_list[new_two_hop_id] == NULL);
-    neighbor_entry_t* ret_entry = calloc(1, sizeof(two_hop_entry_t)); // set to zeros
+    two_hop_entry_t* ret_entry = calloc(1, sizeof(two_hop_entry_t)); // set to zeros
     if(ret_entry == NULL) {
         ESP_LOGE(TAG, "No mem for a new two-hop entry.");
         return NULL;
@@ -114,7 +120,10 @@ void update_id_lists() {
     remote_id_num = 0;
 
     for(int p=1; p <= peer_num; p++) { // do not use #0
-        assert(entry_ptr_list[p] != NULL);
+        if (entry_ptr_list[p] == NULL) {
+            // the entry has been deleted later.
+            continue;
+        }
         switch ( ((uint8_t*)entry_ptr_list[p])[0] ) {
             case NEIGHBOR_ENTRY: {
                 neighbor_id_list[neighbor_id_num++] = p;
@@ -136,11 +145,53 @@ void update_id_lists() {
     return;
 }
 
+// loop over all entries and delete invalid entries
+// by comparing global_tick_num and entry->valid_until. 
+// valid_until field should be at the same location for all entries.
+void check_entry_validity() {
+    uint8_t* tmp_entry_ptr = NULL;
+    uint8_t delete_flag = 0;
+    for(int n=1; n <= peer_num; n++) { // do not use #0
+        if(entry_ptr_list[n] == NULL) continue;
+        tmp_entry_ptr = (uint8_t*)entry_ptr_list[n];
+        // check entry type
+        if (tmp_entry_ptr[0] == NEIGHBOR_ENTRY) {
+            neighbor_entry_t* neighbor_entry_ptr = (neighbor_entry_t*)tmp_entry_ptr;
+            // check if valid
+            if(neighbor_entry_ptr->valid_until < global_tick_num) {
+                //delete that entry, also need to free link info.
+                delete_flag = 1;
+                // it should be fine to free NULL
+                free(neighbor_entry_ptr->link_info.id_list_ptr);
+                free(neighbor_entry_ptr->link_info.metric_list_ptr);
+                free(neighbor_entry_ptr);
+                entry_ptr_list[n] = NULL;
+            }
+        } 
+        else {
+            two_hop_entry_t* two_hop_entry_ptr = (two_hop_entry_t*)tmp_entry_ptr;
+            // check if valid
+            if (two_hop_entry_ptr->valid_until < global_tick_num) {
+                delete_flag = 1;
+                // it should be fine to free NULL
+                free(two_hop_entry_ptr->link_info.id_list_ptr);
+                free(two_hop_entry_ptr->link_info.metric_list_ptr);
+                free(two_hop_entry_ptr);
+                entry_ptr_list[n] = NULL;
+            }
+        }
+    }
+    // if delete some entry, update the id_lists.
+    if(delete_flag) {
+        update_id_lists();
+    }
+}
+
 
 /* Worker functions */
 
 void set_info_base_time (uint32_t tick) {
-    glocal_tick_num = tick;
+    global_tick_num = tick;
 }
 
 void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
@@ -173,7 +224,7 @@ void print_topology_set () {
 }
 
 // parse the link info given a HELLO msg
-void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* hello_msg_ptr) {
+void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* hello_msg_ptr, uint32_t hello_valid_until) {
     // 1. get addr tlv pointers.
     uint8_t link_num = hello_msg_ptr->addr_block_ptr->addr_num;
     assert( hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_len == HELLO_ADDR_TLV_NUM );
@@ -240,17 +291,22 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
                 // store this id
                 neighbor_entry_ptr->link_info.id_list_ptr[l] = sender_neighbor_id;
                 uint8_t* tmp_type_ptr = (uint8_t*)(entry_ptr_list[sender_neighbor_id]);
+                two_hop_entry_t* tmp_two_hop_ptr = NULL;
                 // if this is a remote node entry.
-                if (tmp_type_ptr[0] == REMOTE_NODE_ENTRY) {
-                    tmp_type_ptr[0] = TWO_HOP_ENTRY; // entry switch from remote to two-hop.
-                    // id_lists will be updated later to keep consistence.
+                if (tmp_type_ptr[0] == REMOTE_NODE_ENTRY || tmp_type_ptr[0] == TWO_HOP_ENTRY) {
+                    tmp_type_ptr[0] = TWO_HOP_ENTRY; // entry must switch from remote to two-hop.
+                                                // id_lists will be updated later to keep consistence.
+                    // update validity
+                    tmp_two_hop_ptr = (two_hop_entry_t*) tmp_type_ptr;
+                    tmp_two_hop_ptr->valid_until = hello_valid_until;
                 }
-                // if this is a neighbor node or two-hop node id. do nothing.
+                // if this is a neighbor node id. do nothing.
             }
             else {
                 // a new two hop entry.
                 assert(sender_neighbor_id != 0);
-                register_new_two_hop(sender_neighbor_id);
+                two_hop_entry_t* ret_entry_ptr = register_new_two_hop(sender_neighbor_id);
+                ret_entry_ptr->valid_until = hello_valid_until;
             }
         }
     }
@@ -315,16 +371,13 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, IS_MPR_WILLING, &tmp_value_ptr) == 1 );
     hello_neighbor_entry->is_mpr_willing = *tmp_value_ptr;
     assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, VALIDITY_TIME, &tmp_value_ptr) == 1 );
-    hello_neighbor_entry->valid_until =  glocal_tick_num + *tmp_value_ptr;
+    hello_neighbor_entry->valid_until =  global_tick_num + *tmp_value_ptr;
     
     // update mpr and link info
-    parse_hello_addr_block(hello_neighbor_entry, hello_msg_ptr);
+    parse_hello_addr_block(hello_neighbor_entry, hello_msg_ptr, hello_neighbor_entry->valid_until);
 
     // update id_lists
     update_id_lists();
-
-    // print tpology info
-    print_topology_set();
 }
 
 void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
@@ -378,6 +431,8 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
 // this function assumes that hello msg has got mem allocated.
 void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     if(hello_msg_ptr == NULL) return;
+
+    check_entry_validity();
 
     // assign values to the header.
     msg_header_t* header_ptr = &hello_msg_ptr->header;
@@ -516,5 +571,8 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     // done.
     // ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
     // ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
+
+    // print tpology info
+    print_topology_set();
 }
 

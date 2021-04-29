@@ -1,6 +1,6 @@
 # ESPNOW-OLSR/MESH
 
-TODO:
+DONE:
 1. always use broadcast mac address, do not reply to peer list.
 2. use segmentation to create a larger packet. 
 3. define HELLO message type.
@@ -17,9 +17,12 @@ No much. they can be the same set. They serve different purposes and may be deri
 
 How to define a reasonable metric?
 How to compute routing?
+How detailed the report should be?
 
 I can implement basics and discuss entensions.
 
 TODO:
 1. timer out and delete.
 2. node type switch.
+3. send out TC msg
+4. calculate routing set.
