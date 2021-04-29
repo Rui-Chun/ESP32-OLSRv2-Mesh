@@ -16,7 +16,7 @@
 #define MAX_NEIGHBOUR_NUM 64
 
 #define HELLO_VALIDITY_TICKS 15
-#define HELLO_INTERVAL_TICKS 5
+#define HELLO_INTERVAL_TICKS 3
 #define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
 
 #define HELLO_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block

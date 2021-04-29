@@ -19,3 +19,7 @@ How to define a reasonable metric?
 How to compute routing?
 
 I can implement basics and discuss entensions.
+
+TODO:
+1. timer out and delete.
+2. node type switch.

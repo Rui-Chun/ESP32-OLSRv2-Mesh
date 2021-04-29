@@ -151,7 +151,7 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
 // print info baesd on id_lists and entry_ptr_list.
 void print_topology_set () {
     ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Start printing topology info.");
+    printf("Start printing topology info.\n");
     uint8_t node_id = 0; // peer equals with node.
     for(int n=0; n < neighbor_id_num; n++) {
         node_id = neighbor_id_list[n];
@@ -168,7 +168,7 @@ void print_topology_set () {
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == REMOTE_NODE_ENTRY);
         printf("REMOTE: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
     }
-    ESP_LOGI(TAG, "Done printing topology info.");
+    printf("Done printing topology info.\n");
     ESP_LOGI(TAG, "");
 }
 
