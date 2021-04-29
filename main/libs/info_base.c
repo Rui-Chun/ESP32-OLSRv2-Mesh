@@ -13,7 +13,7 @@ static uint32_t glocal_tick_num = 0; // time counter based on tick
 static uint8_t peer_num = 0; // 255 should be enough.
 
 // a static list for all peer nodes' addresses.
-// Note: We use peer_id #0 to mark empty!
+// Note: We use peer_id #0 to mark empty or originator(self)!
 static uint8_t peer_addr_list[MAX_PEER_NUM][RFC5444_ADDR_LEN]; // use peer_id to get mac address.
 static void* entry_ptr_list[MAX_PEER_NUM];
 
@@ -35,9 +35,9 @@ static uint8_t remote_id_list[MAX_PEER_NUM];
 // 3. An Attached Network Set, recording a gateway
 
 // received message info base, to prevent msg processed/forwarded twice.
-static uint32_t seq_num_seen[MAX_PEER_NUM];
+// this has been moved to node entry, msg_seq_num field.
 
-// Local Information Base: Originator address
+// Local Information Base: Originator address / my own address
 static uint8_t originator_addr[RFC5444_ADDR_LEN];
 
 /* Helper functions */
@@ -59,7 +59,7 @@ uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id) 
 
 }
 
-// register a new neighbor struct into the entry_ptr_list and neighbor_id_list
+// register a new neighbor struct into the entry_ptr_list, id_list needs to be updated later.
 neighbor_entry_t* register_new_neighbor(uint8_t new_neighbor_id) {
     if (new_neighbor_id == 0 ) {
         ESP_LOGW(TAG, "Do not register peer #0!");
@@ -79,8 +79,33 @@ neighbor_entry_t* register_new_neighbor(uint8_t new_neighbor_id) {
     // register the entry to the entry list
     entry_ptr_list[new_neighbor_id] = ret_entry;
 
+    ESP_LOGI(TAG, "A new neighbor node entry registered.");
     return ret_entry;
 }
+
+// register a new two-hop struct into the entry_ptr_list, id_list needs to be updated later,
+two_hop_entry_t* register_new_two_hop(uint8_t new_two_hop_id) {
+    if (new_two_hop_id == 0 ) {
+        ESP_LOGW(TAG, "Do not register peer #0!");
+        return NULL;
+    }
+    // must be unregistered
+    assert(entry_ptr_list[new_two_hop_id] == NULL);
+    neighbor_entry_t* ret_entry = calloc(1, sizeof(two_hop_entry_t)); // set to zeros
+    if(ret_entry == NULL) {
+        ESP_LOGE(TAG, "No mem for a new two-hop entry.");
+        return NULL;
+    }
+    // init neighbor entry
+    ret_entry->entry_type = TWO_HOP_ENTRY;
+    ret_entry->peer_id = new_two_hop_id;
+    // register the entry to the entry list
+    entry_ptr_list[new_two_hop_id] = ret_entry;
+
+    ESP_LOGI(TAG, "A new two-hop node entry registered.");
+    return ret_entry;
+}
+
 
 // loop over the entry list to count the number of neighbor entries.
 void update_id_lists() {
@@ -123,8 +148,116 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
     ESP_LOGI(TAG, "init done, mac addr =  "MACSTR".", MAC2STR(originator_addr));
 }
 
-void gen_hello_link_info(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* hello_msg_ptr) {
-    // TODO:
+// print info baesd on id_lists and entry_ptr_list.
+void print_topology_set () {
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Start printing topology info.");
+    uint8_t node_id = 0; // peer equals with node.
+    for(int n=0; n < neighbor_id_num; n++) {
+        node_id = neighbor_id_list[n];
+        assert( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY);
+        printf("Neighbor: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+    }
+    for(int n=0; n < two_hop_id_num; n++) {
+        node_id = two_hop_id_list[n];
+        assert( ((uint8_t*)entry_ptr_list[node_id])[0] == TWO_HOP_ENTRY);
+        printf("TWO_HOP: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+    }
+    for(int n=0; n < remote_id_num; n++) {
+        node_id = remote_id_list[n];
+        assert( ((uint8_t*)entry_ptr_list[node_id])[0] == REMOTE_NODE_ENTRY);
+        printf("REMOTE: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+    }
+    ESP_LOGI(TAG, "Done printing topology info.");
+    ESP_LOGI(TAG, "");
+}
+
+// parse the link info given a HELLO msg
+void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* hello_msg_ptr) {
+    // 1. get addr tlv pointers.
+    uint8_t link_num = hello_msg_ptr->addr_block_ptr->addr_num;
+    assert( hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_len == HELLO_ADDR_TLV_NUM );
+    tlv_t* link_status_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0];
+    assert( link_status_tlv_ptr->tlv_value_len == link_num);
+    tlv_t* link_metric_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1];
+    assert( link_metric_tlv_ptr->tlv_value_len == link_num);
+    tlv_t* mpr_status_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2];
+    assert( mpr_status_tlv_ptr->tlv_value_len == link_num * 2); // 2 bytes each value, for flooding and routing
+
+    // 2. delete and alloc link info struct
+    if (neighbor_entry_ptr->link_info.link_num != 0) {
+        // delete old values
+        free(neighbor_entry_ptr->link_info.id_list_ptr);
+        free(neighbor_entry_ptr->link_info.metric_list_ptr);
+    }
+    neighbor_entry_ptr->link_info.link_num = link_num;
+    neighbor_entry_ptr->link_info.id_list_ptr = calloc(link_num, sizeof(uint8_t));
+    if (neighbor_entry_ptr->link_info.id_list_ptr == NULL) return;
+    neighbor_entry_ptr->link_info.metric_list_ptr = calloc(link_num, sizeof(uint8_t));
+    if (neighbor_entry_ptr->link_info.metric_list_ptr == NULL) {
+        free(neighbor_entry_ptr->link_info.id_list_ptr);
+        return;
+    }
+    // copy metric data
+    memcpy(neighbor_entry_ptr->link_info.metric_list_ptr, link_metric_tlv_ptr->tlv_value, link_num);
+
+
+    // 3. loop over addr block values.
+    uint8_t* link_addr_ptr = NULL;
+    uint8_t sender_neighbor_id = 0; // here means the neighbor of the HELLO sender
+    uint8_t is_link_summetric = 0;
+    for(int l=0; l < link_num; l++) {
+        link_addr_ptr = hello_msg_ptr->addr_block_ptr->addr_list + l * RFC5444_ADDR_LEN;
+        assert(link_status_tlv_ptr->tlv_value[l] != LINK_LOST);
+        // (1) if this link point to me/self_addr
+        if (memcmp(link_addr_ptr, originator_addr, RFC5444_ADDR_LEN) == 0) {
+            // we have a symmetric link
+            neighbor_entry_ptr->link_info.id_list_ptr[l] = 0; // empty or originator.
+            is_link_summetric = 1;
+            neighbor_entry_ptr->link_status = LINK_SYMMETRIC;
+            // update MPR info
+            // if this node chooses me as the routing MPR.
+            if (mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO || mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO_FROM) {
+                // it is my MPR selector
+                if (neighbor_entry_ptr->flooding_status == NOT_FLOODING) 
+                    neighbor_entry_ptr->flooding_status = FLOODING_FROM;
+                if (neighbor_entry_ptr->flooding_status == FLOODING_TO) 
+                    neighbor_entry_ptr->flooding_status = FLOODING_TO_FROM;
+            }
+            // if this node chooses me as the routing MPR.
+            if (mpr_status_tlv_ptr->tlv_value[l*2+1] == ROUTING_TO || mpr_status_tlv_ptr->tlv_value[l*2+1] == ROUTING_TO_FROM) {
+                // it is my MPR selector
+                if (neighbor_entry_ptr->routing_status == NOT_ROUTING) 
+                    neighbor_entry_ptr->routing_status = ROUTING_FROM;
+                if (neighbor_entry_ptr->routing_status == ROUTING_TO) 
+                    neighbor_entry_ptr->routing_status = ROUTING_TO_FROM;
+            }
+        } 
+        else if (link_status_tlv_ptr->tlv_value[l] == LINK_SYMMETRIC) { 
+            // (2) if is other nodes and link is symmetric 
+            // if we have seen this node before.
+            if( get_or_create_id(link_addr_ptr, &sender_neighbor_id) ) {
+                // store this id
+                neighbor_entry_ptr->link_info.id_list_ptr[l] = sender_neighbor_id;
+                uint8_t* tmp_type_ptr = (uint8_t*)(entry_ptr_list[sender_neighbor_id]);
+                // if this is a remote node entry.
+                if (tmp_type_ptr[0] == REMOTE_NODE_ENTRY) {
+                    tmp_type_ptr[0] = TWO_HOP_ENTRY; // entry switch from remote to two-hop.
+                    // id_lists will be updated later to keep consistence.
+                }
+                // if this is a neighbor node or two-hop node id. do nothing.
+            }
+            else {
+                // a new two hop entry.
+                assert(sender_neighbor_id != 0);
+                register_new_two_hop(sender_neighbor_id);
+            }
+        }
+    }
+    // update if not symmetric link
+    if (is_link_summetric == 0) {
+        neighbor_entry_ptr->link_status = LINK_HEARD;
+    }
 
 }
 
@@ -174,17 +307,24 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
         ESP_LOGW(TAG, "Got an out-dated packet, drop it.");
         return;
     }
+    // update seq_num
+    hello_neighbor_entry->msg_seq_num = hello_msg_ptr->header.msg_seq_num;
+    // TODO: how to assign link metric ??
+    hello_neighbor_entry->link_metric = 1; // default metric -> 1 hop cost.
     uint8_t* tmp_value_ptr = NULL;
     assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, IS_MPR_WILLING, &tmp_value_ptr) == 1 );
     hello_neighbor_entry->is_mpr_willing = *tmp_value_ptr;
     assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, VALIDITY_TIME, &tmp_value_ptr) == 1 );
     hello_neighbor_entry->valid_until =  glocal_tick_num + *tmp_value_ptr;
     
-    // update link info
-    gen_hello_link_info(hello_neighbor_entry, hello_msg_ptr);
+    // update mpr and link info
+    parse_hello_addr_block(hello_neighbor_entry, hello_msg_ptr);
 
     // update id_lists
     update_id_lists();
+
+    // print tpology info
+    print_topology_set();
 }
 
 void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
@@ -237,7 +377,6 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
 
 // this function assumes that hello msg has got mem allocated.
 void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
-    // TODO:
     if(hello_msg_ptr == NULL) return;
 
     // assign values to the header.
@@ -375,7 +514,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     // calculate msg len!
     ESP_LOGI(TAG, "A new HELLO with len = %d", header_ptr->msg_size);
     // done.
-    ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
+    // ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
+    // ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
 }
 

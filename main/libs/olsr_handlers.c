@@ -29,7 +29,6 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
     return ret_evt;
 }
 
-// TODO: this is running at timer task !! Reorganize workflow! Do less work here !
 espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     espnow_olsr_event_t ret_evt;
     ret_evt.id = ESPNOW_OLSR_NO_OP;
@@ -57,8 +56,8 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
         new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.hello_msg_ptr->header.msg_size;
     }
 
-    // gen raw pkt and send to event
-    if(new_rfc_pkt.pkt_len > 0) {
+    // gen raw pkt and send to event, only if there is msg
+    if(new_rfc_pkt.pkt_len > RFC5444_PKT_HEADER_LEN) {
         new_raw_pkt = gen_raw_packet(new_rfc_pkt);
         assert(new_raw_pkt.pkt_data != NULL);
         ret_evt.id = ESPNOW_OLSR_SEND_TO;
@@ -70,3 +69,4 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     free_rfc5444_pkt(new_rfc_pkt);
     return ret_evt;
 }
+

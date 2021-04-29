@@ -15,8 +15,8 @@
 #define MAX_PEER_NUM 128
 #define MAX_NEIGHBOUR_NUM 64
 
-#define HELLO_VALIDITY_TICKS 5
-#define HELLO_INTERVAL_TICKS 1
+#define HELLO_VALIDITY_TICKS 15
+#define HELLO_INTERVAL_TICKS 5
 #define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
 
 #define HELLO_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
@@ -31,9 +31,9 @@
 // #define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, RFC5444_ADDR_LEN) == 0)
 
 typedef enum link_status_t {
-    LINK_HEARD,
+    LINK_HEARD = 0,
     LINK_SYMMETRIC,
-    LINK_LOST,
+    LINK_LOST,          // do not use it. Just delete entry if timeout.
 } link_status_t;
 
 typedef enum flooding_mpr_status_t {
@@ -72,12 +72,11 @@ typedef struct remote_node_entry_t {
     link_info_t link_info;
 } remote_node_entry_t;
 
+// Note: two-hop entry and remote entry are inter-changeable.
 typedef struct two_hop_entry_t {
     uint8_t entry_type;
     uint8_t peer_id;
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
-    link_status_t link_status;
-    uint8_t link_metric;
     uint8_t routing_next_hop; // what is the next hop to get to the remote node
     routing_mpr_status_t routing_status;
     uint32_t valid_until;

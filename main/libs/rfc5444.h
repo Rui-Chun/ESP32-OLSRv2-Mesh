@@ -54,7 +54,7 @@ typedef enum tlv_type_t {
     INTERVAL_TIME,
     CONT_SEQ_NUM,
     MPR_WILLING,
-    LINK_STATUS, // TODO: combine multiple statistic
+    LINK_STATUS, // three addr tlv entries
     LINK_METRIC,
     MPR_STATUS,
 } tlv_type_t;
