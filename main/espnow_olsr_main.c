@@ -195,8 +195,8 @@ static void espnow_olsr_task(void *pvParameter)
 
     // espnow event loop, should loop forever.
     while (xQueueReceive(s_espnow_olsr_queue, &evt, portMAX_DELAY) == pdTRUE) {
-        ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
-        ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
+        // ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
+        // ESP_LOGI(TAG, "task stack water mark : %d", uxTaskGetStackHighWaterMark(NULL));
         switch (evt.id) {
             // a packet need to be sent, most likely we need send multiple frames
             case ESPNOW_OLSR_SEND_TO:
