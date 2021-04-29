@@ -112,6 +112,39 @@ two_hop_entry_t* register_new_two_hop(uint8_t new_two_hop_id) {
     return ret_entry;
 }
 
+// delete a entry and free the mem. 
+// msut call update_id_lists() after calling this function.
+void delete_entry_by_id (uint8_t node_id) {
+    uint8_t* tmp_entry_ptr = entry_ptr_list[node_id];
+    if (tmp_entry_ptr == NULL ) return;
+
+    switch (tmp_entry_ptr[0]) {
+        case NEIGHBOR_ENTRY: {
+            neighbor_entry_t* neighbor_entry_ptr = (neighbor_entry_t*) tmp_entry_ptr;
+            // it should be fine to free NULL
+            free(neighbor_entry_ptr->link_info.id_list_ptr);
+            free(neighbor_entry_ptr->link_info.metric_list_ptr);
+            free(neighbor_entry_ptr);
+            entry_ptr_list[node_id] = NULL;
+            break;
+        }
+        case TWO_HOP_ENTRY: {
+            // leak through to next case
+        }
+        case REMOTE_NODE_ENTRY: {
+            remote_node_entry_t* remote_entry_ptr = (remote_node_entry_t*) tmp_entry_ptr;
+            // it should be fine to free NULL
+            free(remote_entry_ptr->link_info.id_list_ptr);
+            free(remote_entry_ptr->link_info.metric_list_ptr);
+            free(remote_entry_ptr);
+            entry_ptr_list[node_id] = NULL;
+            break;
+        }
+        default: {
+            ESP_LOGW(TAG, "Wrong entry type!");
+        }
+    }
+}
 
 // loop over the entry list to count the number of neighbor entries.
 void update_id_lists() {
@@ -338,12 +371,22 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
             }
             case TWO_HOP_ENTRY: {
                 ESP_LOGI(TAG, "Hello msg is from a two-hop node?");
-                // TODO: handle node type switch
+                // handle node type switch
+                // (1) delete old entry
+                delete_entry_by_id(neighbor_id);
+                // (2) register new entry
+                ESP_LOGI(TAG, "A new neighbor node is heard! addr = "MACSTR" .", MAC2STR(hello_orig_addr));
+                hello_neighbor_entry = register_new_neighbor(neighbor_id);
                 break;
             }
             case REMOTE_NODE_ENTRY: {
                 ESP_LOGI(TAG, "Hello msg is from a remote node?");
-                // TODO: handle node type switch
+                // handle node type switch
+                // (1) delete old entry
+                delete_entry_by_id(neighbor_id);
+                // (2) register new entry
+                ESP_LOGI(TAG, "A new neighbor node is heard! addr = "MACSTR" .", MAC2STR(hello_orig_addr));
+                hello_neighbor_entry = register_new_neighbor(neighbor_id);
                 break;
             }
             default: {
@@ -359,7 +402,8 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     
     // 2. update entry, neighor and two hop entries
     assert(hello_neighbor_entry->peer_id == neighbor_id);
-    if (hello_msg_ptr->header.msg_seq_num < hello_neighbor_entry->msg_seq_num) {
+    // if the node restarts, do not drop the packet.
+    if (hello_msg_ptr->header.msg_seq_num > 0 && hello_msg_ptr->header.msg_seq_num <= hello_neighbor_entry->msg_seq_num) {
         ESP_LOGW(TAG, "Got an out-dated packet, drop it.");
         return;
     }

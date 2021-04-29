@@ -15,12 +15,6 @@ Routers MAY make individual decisions as to whether to use link metrics for the 
 
 No much. they can be the same set. They serve different purposes and may be derived from different algorithms. From RFC, it looks like flooding MPR can just use 1 as metric for all links, while routing MPR needs to use metric.
 
-How to define a reasonable metric?
-How to compute routing?
-How detailed the report should be?
-
-I can implement basics and discuss entensions.
-
 TODO:
 1. timer out and delete.
 2. node type switch.
