@@ -246,7 +246,7 @@ void print_topology_set () {
         node_id = neighbor_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY);
         neighbor_ptr = entry_ptr_list[node_id];
-        printf("Neighbor:\tnode id = #%d: "MACSTR" \t link_status = %d \n", node_id, MAC2STR(peer_addr_list[node_id]), neighbor_ptr->link_status);
+        printf("Neighbor:\tnode id = #%d: "MACSTR" \t link_status = %d, routing next_hop = #%d\n", node_id, MAC2STR(peer_addr_list[node_id]), neighbor_ptr->link_status, neighbor_ptr->routing_info.next_hop);
         printf("\tMPR status = (%d, %d), \tout_metric = %d, in_metric = %d \n", neighbor_ptr->flooding_status, neighbor_ptr->routing_status, neighbor_ptr->link_metric, neighbor_ptr->in_link_metric);
     }
     for(int n=0; n < two_hop_id_num; n++) {
@@ -254,7 +254,7 @@ void print_topology_set () {
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == TWO_HOP_ENTRY);
         printf("TWO_HOP: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
         two_hop_ptr = entry_ptr_list[node_id];
-        printf(" \trouting next hop = #%d \n", two_hop_ptr->routing_next_hop);
+        printf(" \trouting next hop = #%d \n", two_hop_ptr->routing_info.next_hop);
     }
     for(int n=0; n < remote_id_num; n++) {
         node_id = remote_id_list[n];
@@ -651,9 +651,14 @@ uint8_t is_two_hop_node (uint8_t node_id) {
     // There are a few possibilities.
     // 1. it is zero, which means emtpy node_id. 2. the entry pointer is NULL, it just got deleted!
     // 3. the entry is not a two_hop entry. 4. this line must be symmetric (this is already satisfied since we only register symmetric two hop)
-    if( node_id == 0 || entry_ptr_list[node_id] == NULL || ((uint8_t*)entry_ptr_list[node_id])[0] != TWO_HOP_ENTRY ) {
+    if( node_id == 0 || entry_ptr_list[node_id] == NULL ) {
         return 0;
     }
+    // a special case: an asym neighbor node.
+    if ( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY && ((neighbor_entry_t*)entry_ptr_list[node_id])->link_status == LINK_HEARD )
+        return 1;
+    if ( ((uint8_t*)entry_ptr_list[node_id])[0] != TWO_HOP_ENTRY ) 
+        return 0;
     return 1;
 }
 
@@ -707,7 +712,7 @@ void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_m
 }
 
 // update MPR selection. We use the same selection for flooding and routing MPR.
-void record_mpr_selection (int16_t* potential_mpr_list) {
+void record_mpr_selection (int16_t* potential_mpr_list, uint8_t* mpr_metric_list) {
     uint8_t neighbor_id = 0;
     neighbor_entry_t* neighbor_ptr = NULL;
     two_hop_entry_t* two_hop_ptr = NULL;
@@ -731,9 +736,23 @@ void record_mpr_selection (int16_t* potential_mpr_list) {
             neighbor_ptr->routing_status = ROUTING_TO_FROM;
         // record this two-hop node's routing path
         two_hop_ptr = entry_ptr_list[two_hop_id_list[x]];
-        two_hop_ptr->routing_next_hop = neighbor_id;
+        two_hop_ptr->routing_info.next_hop = neighbor_id;
+        two_hop_ptr->routing_info.hop_num = 2;
+        two_hop_ptr->routing_info.path_metric = mpr_metric_list[two_hop_id_list[x]];
     }
-
+    // there may be asym neighbors
+    for (int n=0; n < neighbor_id_num; n++) {
+        // if asym link
+        if ( ((neighbor_entry_t*)entry_ptr_list[neighbor_id_list[n]])->link_status == LINK_HEARD ) {
+            // if there is a path.
+            if (potential_mpr_list[neighbor_id_list[n]] > 0) {
+                neighbor_entry_t* asym_neighbor_ptr = entry_ptr_list[neighbor_id_list[n]];
+                asym_neighbor_ptr->routing_info.next_hop = potential_mpr_list[neighbor_id_list[n]];
+                asym_neighbor_ptr->routing_info.hop_num = 2;
+                asym_neighbor_ptr->routing_info.path_metric = mpr_metric_list[neighbor_id_list[n]];
+            }
+        }
+    }
 }
 
 // select MPR according latest info base and update node entry status
@@ -866,7 +885,7 @@ void update_mpr_status () {
     }
 
     // 4. record MPR results
-    record_mpr_selection(potential_mpr_list);
+    record_mpr_selection(potential_mpr_list, mpr_metric_list);
 
     // FREE mem
     free(potential_mpr_list);

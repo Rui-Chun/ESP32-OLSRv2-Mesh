@@ -21,7 +21,12 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
         // only update, no event scheduled.
     }
 
-    // TODO: 2. handle possible TC msg
+    // 2. handle possible TC msg
+    if (recv_rfc_pkt.tc_msg_ptr != NULL) {
+        // update info base given TC msg
+        parse_tc_msg(recv_rfc_pkt.tc_msg_ptr);
+        // TODO: we need to forward this TC msg
+    }
 
     // MUST free all mem
     free_rfc5444_pkt(recv_rfc_pkt);
@@ -59,6 +64,26 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
         // generate hello msg content
         gen_hello_msg(new_rfc_pkt.hello_msg_ptr);
         new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.hello_msg_ptr->header.msg_size;
+    }
+    // 2. send out possible TC msg
+    if (tick_num % TC_INTERVAL_TICKS == 0) {
+        if (tick_num % HELLO_INTERVAL_TICKS != 0) {
+            // check validity and delete timeout entries
+            check_entry_validity();
+            // update flooding and routing MPR
+            update_mpr_status();
+        }
+        // generate and prepare TC msg
+        new_rfc_pkt.tc_msg_ptr = malloc(sizeof(tc_msg_t));
+        if (new_rfc_pkt.tc_msg_ptr == NULL) {
+            ESP_LOGE(TAG, "No mem for new TC msg!");
+            free_rfc5444_pkt(new_rfc_pkt);
+            return ret_evt;
+        }
+        memset(new_rfc_pkt.tc_msg_ptr, 0, sizeof(tc_msg_t));
+        // generate tc msg content
+        gen_tc_msg(new_rfc_pkt.tc_msg_ptr);
+        new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.tc_msg_ptr->header.msg_size;     
     }
 
     // gen raw pkt and send to event, only if there is msg

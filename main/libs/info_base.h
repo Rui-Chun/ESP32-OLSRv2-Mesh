@@ -17,6 +17,8 @@
 
 #define HELLO_VALIDITY_TICKS 15
 #define HELLO_INTERVAL_TICKS 3
+#define TC_VALIDITY_TICKS 20
+#define TC_INTERVAL_TICKS 5
 #define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
 
 #define HELLO_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
@@ -63,6 +65,12 @@ typedef struct link_info_t {
     uint8_t* in_metric_list_ptr; // in comming link metric ptr list. TODO: this seems useless, may delete it.
 } link_info_t;
 
+typedef struct routing_info_t {
+    uint8_t next_hop;
+    uint8_t hop_num;
+    uint8_t path_metric;
+} routing_info_t;
+
 // TODO: add support for defining gateways.
 
 typedef struct remote_node_entry_t {
@@ -70,9 +78,9 @@ typedef struct remote_node_entry_t {
     uint8_t peer_id;
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
     uint32_t valid_until;
-    uint8_t routing_next_hop; // what is the next hop to get to the remote node
     routing_mpr_status_t routing_status;
     link_info_t link_info;
+    routing_info_t routing_info;
 } remote_node_entry_t;
 
 // Note: two-hop entry and remote entry are inter-changeable.
@@ -81,9 +89,9 @@ typedef struct two_hop_entry_t {
     uint8_t peer_id;
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
     uint32_t valid_until;
-    uint8_t routing_next_hop; // what is the next hop to get to the remote node
     routing_mpr_status_t routing_status;
     link_info_t link_info;
+    routing_info_t routing_info;
 }two_hop_entry_t;
 
 /* we only consider one interface, so Interface Information Base merges with Neighbor Information Base. */
@@ -99,6 +107,7 @@ typedef struct neighbor_entry_t {
     flooding_mpr_status_t flooding_status;
     routing_mpr_status_t routing_status;
     link_info_t link_info;
+    routing_info_t routing_info; // this is needed because there may be asymmetric neighbors.
 } neighbor_entry_t;
 
 // TODO: info_base.c should only store and provide helper functions to operate on info bases.
@@ -106,6 +115,8 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]);
 void set_info_base_time (uint32_t tick);
 void parse_hello_msg (hello_msg_t* hello_msg_ptr);
 void gen_hello_msg (hello_msg_t* hello_msg_ptr);
+void parse_tc_msg (tc_msg_t* tc_msg_ptr);
+void gen_tc_msg (tc_msg_t* tc_msg_ptr);
 void update_mpr_status ();
 void check_entry_validity();
 
