@@ -102,5 +102,6 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]);
 void set_info_base_time (uint32_t tick);
 void parse_hello_msg (hello_msg_t* hello_msg_ptr);
 void gen_hello_msg (hello_msg_t* hello_msg_ptr);
+void update_mpr_status ();
 
 #endif

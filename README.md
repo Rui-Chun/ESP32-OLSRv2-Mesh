@@ -16,7 +16,11 @@ Routers MAY make individual decisions as to whether to use link metrics for the 
 No much. they can be the same set. They serve different purposes and may be derived from different algorithms. From RFC, it looks like flooding MPR can just use 1 as metric for all links, while routing MPR needs to use metric.
 
 TODO:
-1. timer out and delete.
-2. node type switch.
-3. send out TC msg
-4. calculate routing set.
+1. timer out and delete. done
+2. node type switch. done
+3. derive flooding and routing MPR
+4. send out TC msg 
+5. calculate routing set.
+
+Metric support:
+1. some nodes should be put in two-hop list, because twp hop metric is lower than one-hop.

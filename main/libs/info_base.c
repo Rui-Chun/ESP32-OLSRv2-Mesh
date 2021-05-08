@@ -237,15 +237,21 @@ void print_topology_set () {
     ESP_LOGI(TAG, "");
     printf("Start printing topology info.\n");
     uint8_t node_id = 0; // peer equals with node.
+    neighbor_entry_t* neighbor_ptr = NULL;
+    two_hop_entry_t* two_hop_ptr = NULL;
     for(int n=0; n < neighbor_id_num; n++) {
         node_id = neighbor_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY);
         printf("Neighbor: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+        neighbor_ptr = entry_ptr_list[node_id];
+        printf(" \tMPR status = %d, %d \n", neighbor_ptr->flooding_status, neighbor_ptr->routing_status);
     }
     for(int n=0; n < two_hop_id_num; n++) {
         node_id = two_hop_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == TWO_HOP_ENTRY);
         printf("TWO_HOP: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+        two_hop_ptr = entry_ptr_list[node_id];
+        printf(" \trouting next hop = #%d \n", two_hop_ptr->routing_next_hop);
     }
     for(int n=0; n < remote_id_num; n++) {
         node_id = remote_id_list[n];
@@ -338,6 +344,7 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
             else {
                 // a new two hop entry.
                 assert(sender_neighbor_id != 0);
+                neighbor_entry_ptr->link_info.id_list_ptr[l] = sender_neighbor_id;
                 two_hop_entry_t* ret_entry_ptr = register_new_two_hop(sender_neighbor_id);
                 ret_entry_ptr->valid_until = hello_valid_until;
             }
@@ -405,6 +412,8 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     // if the node restarts, do not drop the packet.
     if (hello_msg_ptr->header.msg_seq_num > 0 && hello_msg_ptr->header.msg_seq_num <= hello_neighbor_entry->msg_seq_num) {
         ESP_LOGW(TAG, "Got an out-dated packet, drop it.");
+        // update id_lists, to keep them correct
+        update_id_lists();
         return;
     }
     // update seq_num
@@ -420,7 +429,7 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     // update mpr and link info
     parse_hello_addr_block(hello_neighbor_entry, hello_msg_ptr, hello_neighbor_entry->valid_until);
 
-    // update id_lists
+    // update id_lists, to keep them correct
     update_id_lists();
 }
 
@@ -586,7 +595,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2] = malloc(tmp_len);
     tmp_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2];
     if(tmp_tlv_ptr == NULL) {
-        ESP_LOGE(TAG, "No mem for addr tlv 1 entry!");
+        ESP_LOGE(TAG, "No mem for addr tlv 2 entry!");
         free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[0]);
         free(hello_msg_ptr->msg_tlv_block_ptr->tlv_ptr_list[1]);
         free(hello_msg_ptr->msg_tlv_block_ptr);
@@ -620,3 +629,205 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     print_topology_set();
 }
 
+// compute the min metric to get to two-hop nodes
+void compute_min_metric (uint8_t* min_metric_list) {
+    uint8_t neighbor_id = 0;
+    neighbor_entry_t* neighbor_ptr = NULL;
+    uint8_t two_hop_id = 0;
+    for (int n=0; n < neighbor_id_num; n++) {
+        neighbor_id = neighbor_id_list[n];
+        neighbor_ptr = entry_ptr_list[neighbor_id];
+        for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
+            two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
+            // ESP_LOGW(TAG, "neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
+            // if this is not a two hop node, skip this one.
+            if ( two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+                continue;
+            }
+            // update min
+            if (neighbor_ptr->link_info.metric_list_ptr[l] < min_metric_list[two_hop_id]) {
+                min_metric_list[two_hop_id] = neighbor_ptr->link_info.metric_list_ptr[l];
+            }
+        }
+    }
+}
+
+// assign the min metric according the new mpr's link info
+void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_mpr_id) {
+    neighbor_entry_t* neighbor_ptr = entry_ptr_list[new_mpr_id];
+    uint8_t two_hop_id = 0;
+    for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
+        two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
+        // if this is not a two hop node, skip this one.
+        if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+            continue;
+        }
+        // update metric list
+        if (metric_list[two_hop_id] > neighbor_ptr->link_info.metric_list_ptr[l]) {
+            metric_list[two_hop_id] = neighbor_ptr->link_info.metric_list_ptr[l];
+            // udpate mpr list
+            mpr_list[two_hop_id] = new_mpr_id;
+        }
+    }
+}
+
+// update MPR selection. We use the same selection for flooding and routing MPR.
+void record_mpr_selection (int16_t* potential_mpr_list) {
+    uint8_t neighbor_id = 0;
+    neighbor_entry_t* neighbor_ptr = NULL;
+    two_hop_entry_t* two_hop_ptr = NULL;
+    for (int x=0; x < two_hop_id_num; x++) {
+        // simple check
+        assert(potential_mpr_list[two_hop_id_list[x]] >= 0);
+        if (potential_mpr_list[two_hop_id_list[x]] == 0) {
+            ESP_LOGW(TAG, "Unlinked two-hop node #%d", two_hop_id_list[x]);
+            continue;
+        }
+        // mark thie neighbor as MPR
+        neighbor_id = potential_mpr_list[two_hop_id_list[x]];
+        neighbor_ptr = entry_ptr_list[neighbor_id];
+        if (neighbor_ptr->flooding_status == NOT_FLOODING)
+            neighbor_ptr->flooding_status = FLOODING_TO;
+        if (neighbor_ptr->flooding_status == FLOODING_FROM)
+            neighbor_ptr->flooding_status = FLOODING_TO_FROM;
+        if (neighbor_ptr->routing_status == NOT_ROUTING)
+            neighbor_ptr->routing_status = ROUTING_TO;
+        if (neighbor_ptr->routing_status == ROUTING_FROM)
+            neighbor_ptr->routing_status = ROUTING_TO_FROM;
+        // record this two-hop node's routing path
+        two_hop_ptr = entry_ptr_list[two_hop_id_list[x]];
+        two_hop_ptr->routing_next_hop = neighbor_id;
+    }
+
+}
+
+// select MPR according latest info base and update node entry status
+void update_mpr_status () {
+    // the list of potential MPR node id
+    int16_t *potential_mpr_list = NULL;
+    uint8_t *min_metric_list = NULL; // the min metric can be achieved by N1
+    uint8_t *mpr_metric_list = NULL; // the min metric can be achieved by M
+    uint8_t neighbor_id = 0;
+    neighbor_entry_t* neighbor_ptr = NULL;
+    uint8_t two_hop_id = 0;
+
+    // alloc mem
+    potential_mpr_list = calloc(MAX_PEER_NUM, 4);
+    if (potential_mpr_list == NULL) {
+        ESP_LOGE(TAG, "Can not alloc mem for lists.");
+        return;
+    }
+    min_metric_list = (uint8_t*)potential_mpr_list + MAX_PEER_NUM * 2;
+    mpr_metric_list = (uint8_t*)potential_mpr_list + MAX_PEER_NUM * 3;
+
+    // init min metric list
+    for(int i=0; i < MAX_PEER_NUM; i++) {
+        mpr_metric_list[i] = 255; // inf
+        min_metric_list[i] = 255;
+    }
+    compute_min_metric(min_metric_list);
+
+    // this is according to the example MPR Selection Algorithm in RFC7181 Appendix B.2
+    // Notations:
+    //      (TODO: update two hop entry list to match N with two-hop entry list.) 
+    //      N -> two hop nodes that can not be accessed in one hop, or neighbor nodes that have a lower metric if routing through two hops.
+    //      M -> MPR set
+    //      R(x,M): For an element x in N1, the number of elements y in N for which d(x,y) is defined has minimal value.
+    //              And no such minimal value can be achieved form M. D(x) = R(x,0)
+    
+    // 1. Add all elements x in N1 that have W(x) = WILL_ALWAYS to M.
+    // TODO: we skip this. Do not support willingness for now.
+    
+    // 2. For each element y in N for which there is only one element x in N1 such that d2(x,y) is defined, add that element x to M.
+    for (int n=0; n < neighbor_id_num; n++) {
+        neighbor_id = neighbor_id_list[n];
+        neighbor_ptr = entry_ptr_list[neighbor_id];
+        for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
+            two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
+            // if this is not a two hop node, skip this one.
+            if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+                continue;
+            }
+            // if no one has claimed MPR for that, take the spot
+            if (potential_mpr_list[two_hop_id] == 0) {
+                potential_mpr_list[two_hop_id] = neighbor_id;
+            }
+            // if some node has claimed. make it invalid.
+            else if (potential_mpr_list[two_hop_id] > 0 ) {
+                potential_mpr_list[two_hop_id] = -1;
+            }
+        }
+    }
+    for (int x=0; x < two_hop_id_num; x++) {
+        // simple coverage check
+        ESP_LOGW(TAG, "x=%d, two_hop id = %d", x, two_hop_id_list[x]);
+        uint8_t potential_mpr = potential_mpr_list[two_hop_id_list[x]];
+        if (potential_mpr == 0) {
+            ESP_LOGW(TAG, "Unlinked two-hop node #%d", two_hop_id_list[x]);
+            continue;
+        }
+        // we have a slot with only one competer. it wins.
+        if (potential_mpr > 0) {
+            // update according to selected MPR
+            update_with_new_mpr(potential_mpr_list, mpr_metric_list, potential_mpr);
+        }
+    }
+
+    // we only need to resolve invalid MPR in the list below.
+
+    // 3. While there exists any element x in N1 with R(x,M) > 0:
+    //    Select an element x in N1 with greatest R(x,M) then add to M.
+    while(1) {
+        uint8_t best_MPR = 0;
+        uint8_t max_R = 0;
+        uint8_t max_D = 0; // this is used to decide MPR, when two nodes has equal max_R.
+        // loop over N1
+        for (int n=0; n < neighbor_id_num; n++) {
+            neighbor_id = neighbor_id_list[n];
+            neighbor_ptr = entry_ptr_list[neighbor_id];
+            uint8_t tmp_R = 0;
+            uint8_t tmp_D = 0;
+            // loop over N1 node's coverage
+            for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
+                two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
+                // if this is not a two hop node, skip this one.
+                if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+                    continue;
+                }
+                tmp_D ++; // add the number of covered two hop nodes
+                uint8_t tmp_metric = neighbor_ptr->link_info.metric_list_ptr[l];
+                // if reaches min metric and smaller than mpr_metric, add R by one. I can cover this one.
+                assert(tmp_metric >= min_metric_list[two_hop_id]);
+                if (tmp_metric == min_metric_list[two_hop_id] && tmp_metric < mpr_metric_list[two_hop_id]) {
+                    tmp_R ++;
+                }
+            }
+            // compare with max_R
+            if (tmp_R > max_R) {
+                best_MPR = neighbor_id;
+                max_R = tmp_R;
+                max_D = tmp_D;
+            }
+            if(tmp_R == max_R && max_R > 0) {
+                if(tmp_D > max_D) {
+                    best_MPR = neighbor_id;
+                    max_R = tmp_R;
+                    max_D = tmp_D;
+                }
+            }
+        }
+        // check MPR id
+        if (best_MPR == 0) {
+            break;
+        }
+        // we have a winner
+        update_with_new_mpr(potential_mpr_list, mpr_metric_list, best_MPR);
+    }
+
+    // 4. record MPR results
+    record_mpr_selection(potential_mpr_list);
+
+    // FREE mem
+    free(potential_mpr_list);
+    
+}

@@ -44,6 +44,9 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     // TODO: logic here
     // 1. send out possible hello msg
     if (tick_num % HELLO_INTERVAL_TICKS == 0) {
+        // update flooding and routing MPR
+        update_mpr_status();
+        // generate and prepare hello msg
         new_rfc_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
         if (new_rfc_pkt.hello_msg_ptr == NULL) {
             ESP_LOGE(TAG, "No mem for new hello msg!");
