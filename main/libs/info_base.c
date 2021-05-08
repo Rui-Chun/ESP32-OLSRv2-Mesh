@@ -148,6 +148,7 @@ void delete_entry_by_id (uint8_t node_id) {
 
 // loop over the entry list to count the number of neighbor entries.
 void update_id_lists() {
+    ESP_LOGI(TAG, "Updating id lists ...");
     neighbor_id_num = 0;
     two_hop_id_num = 0;
     remote_id_num = 0;
@@ -175,6 +176,7 @@ void update_id_lists() {
             }
         }
     }
+    ESP_LOGI(TAG, "neighbor num = %d, two-hop num = %d, remote num = %d", neighbor_id_num, two_hop_id_num, remote_id_num);
     return;
 }
 
@@ -199,6 +201,7 @@ void check_entry_validity() {
                 free(neighbor_entry_ptr->link_info.metric_list_ptr);
                 free(neighbor_entry_ptr);
                 entry_ptr_list[n] = NULL;
+                ESP_LOGW(TAG, "A neighbor node entry is deleted due to timeout!");
             }
         } 
         else {
@@ -211,6 +214,7 @@ void check_entry_validity() {
                 free(two_hop_entry_ptr->link_info.metric_list_ptr);
                 free(two_hop_entry_ptr);
                 entry_ptr_list[n] = NULL;
+                ESP_LOGW(TAG, "A two-hop/remote node entry is deleted due to timeout!");
             }
         }
     }
@@ -485,8 +489,6 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
 void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     if(hello_msg_ptr == NULL) return;
 
-    check_entry_validity();
-
     // assign values to the header.
     msg_header_t* header_ptr = &hello_msg_ptr->header;
     header_ptr->msg_type = MSG_TYPE_HELLO;
@@ -629,6 +631,17 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     print_topology_set();
 }
 
+// check whether this node id points to a two hop node.
+uint8_t is_two_hop_node (uint8_t node_id) {
+    // There are a few possibilities.
+    // 1. it is zero, which means emtpy node_id. 2. the entry pointer is NULL, it just got deleted!
+    // 3. the entry is not a two_hop entry.
+    if( node_id == 0 || entry_ptr_list[node_id] == NULL || ((uint8_t*)entry_ptr_list[node_id])[0] != TWO_HOP_ENTRY ) {
+        return 0;
+    }
+    return 1;
+}
+
 // compute the min metric to get to two-hop nodes
 void compute_min_metric (uint8_t* min_metric_list) {
     uint8_t neighbor_id = 0;
@@ -639,9 +652,9 @@ void compute_min_metric (uint8_t* min_metric_list) {
         neighbor_ptr = entry_ptr_list[neighbor_id];
         for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
             two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
-            // ESP_LOGW(TAG, "neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
+            // ESP_LOGW(TAG, "computing min metric, neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
             // if this is not a two hop node, skip this one.
-            if ( two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+            if ( !is_two_hop_node(two_hop_id)) {
                 continue;
             }
             // update min
@@ -654,12 +667,14 @@ void compute_min_metric (uint8_t* min_metric_list) {
 
 // assign the min metric according the new mpr's link info
 void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_mpr_id) {
+    ESP_LOGI(TAG, "Updating new MPR #%d .", new_mpr_id);
     neighbor_entry_t* neighbor_ptr = entry_ptr_list[new_mpr_id];
+    assert(neighbor_ptr !=  NULL);
     uint8_t two_hop_id = 0;
     for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
         two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
         // if this is not a two hop node, skip this one.
-        if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+        if ( !is_two_hop_node(two_hop_id)) {
             continue;
         }
         // update metric list
@@ -745,7 +760,8 @@ void update_mpr_status () {
         for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
             two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
             // if this is not a two hop node, skip this one.
-            if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+            ESP_LOGI(TAG, "neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
+            if ( !is_two_hop_node(two_hop_id)) {
                 continue;
             }
             // if no one has claimed MPR for that, take the spot
@@ -760,8 +776,9 @@ void update_mpr_status () {
     }
     for (int x=0; x < two_hop_id_num; x++) {
         // simple coverage check
-        ESP_LOGW(TAG, "x=%d, two_hop id = %d", x, two_hop_id_list[x]);
-        uint8_t potential_mpr = potential_mpr_list[two_hop_id_list[x]];
+        // this must be int!
+        int16_t potential_mpr = potential_mpr_list[two_hop_id_list[x]];
+        ESP_LOGI(TAG, "x=%d, two_hop id = %d, potential mpr = #%d", x, two_hop_id_list[x], potential_mpr);
         if (potential_mpr == 0) {
             ESP_LOGW(TAG, "Unlinked two-hop node #%d", two_hop_id_list[x]);
             continue;
@@ -791,7 +808,7 @@ void update_mpr_status () {
             for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
                 two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
                 // if this is not a two hop node, skip this one.
-                if (two_hop_id == 0 || ((uint8_t*)entry_ptr_list[two_hop_id])[0] != TWO_HOP_ENTRY) {
+                if ( !is_two_hop_node(two_hop_id)) {
                     continue;
                 }
                 tmp_D ++; // add the number of covered two hop nodes

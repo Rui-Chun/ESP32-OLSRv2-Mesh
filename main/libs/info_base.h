@@ -103,5 +103,6 @@ void set_info_base_time (uint32_t tick);
 void parse_hello_msg (hello_msg_t* hello_msg_ptr);
 void gen_hello_msg (hello_msg_t* hello_msg_ptr);
 void update_mpr_status ();
+void check_entry_validity();
 
 #endif

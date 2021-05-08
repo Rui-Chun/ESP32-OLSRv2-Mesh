@@ -44,6 +44,8 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
     // TODO: logic here
     // 1. send out possible hello msg
     if (tick_num % HELLO_INTERVAL_TICKS == 0) {
+        // check validity and delete timeout entries
+        check_entry_validity();
         // update flooding and routing MPR
         update_mpr_status();
         // generate and prepare hello msg
