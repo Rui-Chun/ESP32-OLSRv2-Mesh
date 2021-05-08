@@ -59,8 +59,11 @@ typedef enum entry_type_t {
 typedef struct link_info_t {
     uint8_t link_num;
     uint8_t* id_list_ptr; // peer id of the other side.
-    uint8_t* metric_list_ptr;
+    uint8_t* metric_list_ptr; // this is out going metric.
+    uint8_t* in_metric_list_ptr; // in comming link metric ptr list. TODO: this seems useless, may delete it.
 } link_info_t;
+
+// TODO: add support for defining gateways.
 
 typedef struct remote_node_entry_t {
     uint8_t entry_type;
@@ -90,7 +93,8 @@ typedef struct neighbor_entry_t {
     uint32_t msg_seq_num;   // most recent msg seq num , to avoid old packet.
     uint32_t valid_until;
     link_status_t link_status;
-    uint8_t link_metric;  // TODO: enable link metric.
+    uint8_t link_metric;  // out going link metric
+    uint8_t in_link_metric; // in comming metric
     uint8_t is_mpr_willing;
     flooding_mpr_status_t flooding_status;
     routing_mpr_status_t routing_status;

@@ -81,7 +81,10 @@ neighbor_entry_t* register_new_neighbor(uint8_t new_neighbor_id) {
     // init neighbor entry
     ret_entry->entry_type = NEIGHBOR_ENTRY;
     ret_entry->peer_id = new_neighbor_id;
-    ret_entry->link_status = LINK_HEARD; // this maybe useless
+    ret_entry->link_status = LINK_HEARD;
+    // MUST set link metric as INF at init stage
+    ret_entry->link_metric = 255;
+    ret_entry->in_link_metric = 255;
     // register the entry to the entry list
     entry_ptr_list[new_neighbor_id] = ret_entry;
 
@@ -102,9 +105,10 @@ two_hop_entry_t* register_new_two_hop(uint8_t new_two_hop_id) {
         ESP_LOGE(TAG, "No mem for a new two-hop entry.");
         return NULL;
     }
-    // init neighbor entry
+    // init two-hop entry
     ret_entry->entry_type = TWO_HOP_ENTRY;
     ret_entry->peer_id = new_two_hop_id;
+    // TODO: do we need to assign link status?
     // register the entry to the entry list
     entry_ptr_list[new_two_hop_id] = ret_entry;
 
@@ -124,6 +128,7 @@ void delete_entry_by_id (uint8_t node_id) {
             // it should be fine to free NULL
             free(neighbor_entry_ptr->link_info.id_list_ptr);
             free(neighbor_entry_ptr->link_info.metric_list_ptr);
+            free(neighbor_entry_ptr->link_info.in_metric_list_ptr);
             free(neighbor_entry_ptr);
             entry_ptr_list[node_id] = NULL;
             break;
@@ -136,6 +141,7 @@ void delete_entry_by_id (uint8_t node_id) {
             // it should be fine to free NULL
             free(remote_entry_ptr->link_info.id_list_ptr);
             free(remote_entry_ptr->link_info.metric_list_ptr);
+            free(remote_entry_ptr->link_info.in_metric_list_ptr);
             free(remote_entry_ptr);
             entry_ptr_list[node_id] = NULL;
             break;
@@ -196,24 +202,17 @@ void check_entry_validity() {
             if(neighbor_entry_ptr->valid_until < global_tick_num) {
                 //delete that entry, also need to free link info.
                 delete_flag = 1;
-                // it should be fine to free NULL
-                free(neighbor_entry_ptr->link_info.id_list_ptr);
-                free(neighbor_entry_ptr->link_info.metric_list_ptr);
-                free(neighbor_entry_ptr);
-                entry_ptr_list[n] = NULL;
+                delete_entry_by_id(n);
                 ESP_LOGW(TAG, "A neighbor node entry is deleted due to timeout!");
             }
         } 
         else {
+            // two-hop and remote are inter-changeable.
             two_hop_entry_t* two_hop_entry_ptr = (two_hop_entry_t*)tmp_entry_ptr;
             // check if valid
             if (two_hop_entry_ptr->valid_until < global_tick_num) {
                 delete_flag = 1;
-                // it should be fine to free NULL
-                free(two_hop_entry_ptr->link_info.id_list_ptr);
-                free(two_hop_entry_ptr->link_info.metric_list_ptr);
-                free(two_hop_entry_ptr);
-                entry_ptr_list[n] = NULL;
+                delete_entry_by_id(n);
                 ESP_LOGW(TAG, "A two-hop/remote node entry is deleted due to timeout!");
             }
         }
@@ -246,9 +245,9 @@ void print_topology_set () {
     for(int n=0; n < neighbor_id_num; n++) {
         node_id = neighbor_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY);
-        printf("Neighbor: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
         neighbor_ptr = entry_ptr_list[node_id];
-        printf(" \tMPR status = %d, %d \n", neighbor_ptr->flooding_status, neighbor_ptr->routing_status);
+        printf("Neighbor:\tnode id = #%d: "MACSTR" \t link_status = %d \n", node_id, MAC2STR(peer_addr_list[node_id]), neighbor_ptr->link_status);
+        printf("\tMPR status = (%d, %d), \tout_metric = %d, in_metric = %d \n", neighbor_ptr->flooding_status, neighbor_ptr->routing_status, neighbor_ptr->link_metric, neighbor_ptr->in_link_metric);
     }
     for(int n=0; n < two_hop_id_num; n++) {
         node_id = two_hop_id_list[n];
@@ -274,7 +273,7 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
     tlv_t* link_status_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[0];
     assert( link_status_tlv_ptr->tlv_value_len == link_num);
     tlv_t* link_metric_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1];
-    assert( link_metric_tlv_ptr->tlv_value_len == link_num);
+    assert( link_metric_tlv_ptr->tlv_value_len == link_num * 2); // out metric list + in metric list !
     tlv_t* mpr_status_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[2];
     assert( mpr_status_tlv_ptr->tlv_value_len == link_num * 2); // 2 bytes each value, for flooding and routing
 
@@ -283,6 +282,7 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
         // delete old values
         free(neighbor_entry_ptr->link_info.id_list_ptr);
         free(neighbor_entry_ptr->link_info.metric_list_ptr);
+        free(neighbor_entry_ptr->link_info.in_metric_list_ptr);
     }
     neighbor_entry_ptr->link_info.link_num = link_num;
     neighbor_entry_ptr->link_info.id_list_ptr = calloc(link_num, sizeof(uint8_t));
@@ -292,8 +292,15 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
         free(neighbor_entry_ptr->link_info.id_list_ptr);
         return;
     }
-    // copy metric data
+    neighbor_entry_ptr->link_info.in_metric_list_ptr = calloc(link_num, sizeof(uint8_t));
+    if (neighbor_entry_ptr->link_info.in_metric_list_ptr == NULL) {
+        free(neighbor_entry_ptr->link_info.id_list_ptr);
+        free(neighbor_entry_ptr->link_info.metric_list_ptr);
+        return;
+    }
+    // copy in metric data, two lists
     memcpy(neighbor_entry_ptr->link_info.metric_list_ptr, link_metric_tlv_ptr->tlv_value, link_num);
+    memcpy(neighbor_entry_ptr->link_info.in_metric_list_ptr, link_metric_tlv_ptr->tlv_value + link_num, link_num);
 
 
     // 3. loop over addr block values.
@@ -309,6 +316,10 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
             neighbor_entry_ptr->link_info.id_list_ptr[l] = 0; // empty or originator.
             is_link_summetric = 1;
             neighbor_entry_ptr->link_status = LINK_SYMMETRIC;
+            // update neighbor out metric using the neighbor's in metric
+            neighbor_entry_ptr->link_metric = link_metric_tlv_ptr->tlv_value[link_num + l];
+            // TODO: define a reasonable in link metric
+            neighbor_entry_ptr->in_link_metric = 1;
             // update MPR info
             // if this node chooses me as the routing MPR.
             if (mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO || mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO_FROM) {
@@ -328,7 +339,7 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
             }
         } 
         else if (link_status_tlv_ptr->tlv_value[l] == LINK_SYMMETRIC) { 
-            // (2) if is other nodes and link is symmetric 
+            // (2) if is other nodes and link is symmetric (we only add symmetric two hop)
             // if we have seen this node before.
             if( get_or_create_id(link_addr_ptr, &sender_neighbor_id) ) {
                 // store this id
@@ -357,6 +368,9 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
     // update if not symmetric link
     if (is_link_summetric == 0) {
         neighbor_entry_ptr->link_status = LINK_HEARD;
+        // out metric stays INF
+        // TODO: define a reasonable in link metric
+        neighbor_entry_ptr->in_link_metric = 1;
     }
 
 }
@@ -422,8 +436,8 @@ void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
     }
     // update seq_num
     hello_neighbor_entry->msg_seq_num = hello_msg_ptr->header.msg_seq_num;
-    // TODO: how to assign link metric ??
-    hello_neighbor_entry->link_metric = 1; // default metric -> 1 hop cost.
+    // TODO: how to assign link metric ?? This is reduntant, but not a big issue.
+    hello_neighbor_entry->in_link_metric = 1; // default metric -> 1 hop cost.
     uint8_t* tmp_value_ptr = NULL;
     assert( get_tlv_value(hello_msg_ptr->msg_tlv_block_ptr, IS_MPR_WILLING, &tmp_value_ptr) == 1 );
     hello_neighbor_entry->is_mpr_willing = *tmp_value_ptr;
@@ -543,7 +557,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
         free(hello_msg_ptr->addr_block_ptr);
         return;
     }
-    // one addr tlv entry -> LINK_STATUS
+    // generate addr tlv block and all entries
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_type = 0;
     hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_len = HELLO_ADDR_TLV_NUM; // three tlv entry
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size = 0; // to be updated.
@@ -570,7 +584,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
 
     // (2) LINK_METRIC TLV
-    tmp_len = sizeof(tlv_t) + neighbor_num;
+    tmp_len = sizeof(tlv_t) + neighbor_num * 2; // out and in metric lists
     hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1] = malloc(tmp_len);
     tmp_tlv_ptr = hello_msg_ptr->addr_tlv_block_ptr->tlv_ptr_list[1];
     if(tmp_tlv_ptr == NULL) {
@@ -584,10 +598,11 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
         return;
     }
     tmp_tlv_ptr->tlv_type = LINK_METRIC;
-    tmp_tlv_ptr->tlv_value_len = neighbor_num;
+    tmp_tlv_ptr->tlv_value_len = neighbor_num * 2;
     for(int n=0; n < neighbor_num; n++) {
         neighbor_entry_t* neighbor_entry_ptr = entry_ptr_list[neighbor_id_list[n]];
-        tmp_tlv_ptr->tlv_value[n] = neighbor_entry_ptr->link_metric; // assign link metric values
+        tmp_tlv_ptr->tlv_value[n] = neighbor_entry_ptr->link_metric; // assign out link metric value
+        tmp_tlv_ptr->tlv_value[n + neighbor_num] = neighbor_entry_ptr->in_link_metric; // assign in link metric value
     }
     // udpate block size
     hello_msg_ptr->addr_tlv_block_ptr->tlv_block_size += tmp_len;
@@ -635,7 +650,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
 uint8_t is_two_hop_node (uint8_t node_id) {
     // There are a few possibilities.
     // 1. it is zero, which means emtpy node_id. 2. the entry pointer is NULL, it just got deleted!
-    // 3. the entry is not a two_hop entry.
+    // 3. the entry is not a two_hop entry. 4. this line must be symmetric (this is already satisfied since we only register symmetric two hop)
     if( node_id == 0 || entry_ptr_list[node_id] == NULL || ((uint8_t*)entry_ptr_list[node_id])[0] != TWO_HOP_ENTRY ) {
         return 0;
     }
@@ -650,6 +665,8 @@ void compute_min_metric (uint8_t* min_metric_list) {
     for (int n=0; n < neighbor_id_num; n++) {
         neighbor_id = neighbor_id_list[n];
         neighbor_ptr = entry_ptr_list[neighbor_id];
+        // only consider symmetric neighbors
+        if (neighbor_ptr->link_status != LINK_SYMMETRIC) continue;
         for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
             two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
             // ESP_LOGW(TAG, "computing min metric, neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
@@ -658,8 +675,9 @@ void compute_min_metric (uint8_t* min_metric_list) {
                 continue;
             }
             // update min
-            if (neighbor_ptr->link_info.metric_list_ptr[l] < min_metric_list[two_hop_id]) {
-                min_metric_list[two_hop_id] = neighbor_ptr->link_info.metric_list_ptr[l];
+            uint16_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+            if (tmp_metric < min_metric_list[two_hop_id]) {
+                min_metric_list[two_hop_id] = tmp_metric;
             }
         }
     }
@@ -670,6 +688,7 @@ void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_m
     ESP_LOGI(TAG, "Updating new MPR #%d .", new_mpr_id);
     neighbor_entry_t* neighbor_ptr = entry_ptr_list[new_mpr_id];
     assert(neighbor_ptr !=  NULL);
+    assert(neighbor_ptr->link_status == LINK_SYMMETRIC);
     uint8_t two_hop_id = 0;
     for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
         two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
@@ -678,8 +697,9 @@ void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_m
             continue;
         }
         // update metric list
-        if (metric_list[two_hop_id] > neighbor_ptr->link_info.metric_list_ptr[l]) {
-            metric_list[two_hop_id] = neighbor_ptr->link_info.metric_list_ptr[l];
+        uint16_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+        if (metric_list[two_hop_id] > tmp_metric) {
+            metric_list[two_hop_id] = tmp_metric;
             // udpate mpr list
             mpr_list[two_hop_id] = new_mpr_id;
         }
@@ -757,6 +777,8 @@ void update_mpr_status () {
     for (int n=0; n < neighbor_id_num; n++) {
         neighbor_id = neighbor_id_list[n];
         neighbor_ptr = entry_ptr_list[neighbor_id];
+        // only consider symmetric neighbors
+        if (neighbor_ptr->link_status != LINK_SYMMETRIC) continue;
         for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
             two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
             // if this is not a two hop node, skip this one.
@@ -802,6 +824,8 @@ void update_mpr_status () {
         for (int n=0; n < neighbor_id_num; n++) {
             neighbor_id = neighbor_id_list[n];
             neighbor_ptr = entry_ptr_list[neighbor_id];
+            // only consider symmetric neighbors
+            if (neighbor_ptr->link_status != LINK_SYMMETRIC) continue;
             uint8_t tmp_R = 0;
             uint8_t tmp_D = 0;
             // loop over N1 node's coverage
@@ -812,7 +836,7 @@ void update_mpr_status () {
                     continue;
                 }
                 tmp_D ++; // add the number of covered two hop nodes
-                uint8_t tmp_metric = neighbor_ptr->link_info.metric_list_ptr[l];
+                uint8_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
                 // if reaches min metric and smaller than mpr_metric, add R by one. I can cover this one.
                 assert(tmp_metric >= min_metric_list[two_hop_id]);
                 if (tmp_metric == min_metric_list[two_hop_id] && tmp_metric < mpr_metric_list[two_hop_id]) {

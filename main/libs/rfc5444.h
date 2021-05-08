@@ -55,7 +55,7 @@ typedef enum tlv_type_t {
     CONT_SEQ_NUM,
     MPR_WILLING,
     LINK_STATUS, // three addr tlv entries
-    LINK_METRIC,
+    LINK_METRIC, // this should be in comming link metric
     MPR_STATUS,
 } tlv_type_t;
 

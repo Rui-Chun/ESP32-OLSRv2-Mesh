@@ -23,4 +23,4 @@ TODO:
 5. calculate routing set.
 
 Metric support:
-1. some nodes should be put in two-hop list, because twp hop metric is lower than one-hop.
+Link metrics are defined to be directional; the link metric from one router to another may be different from that on the reverse link. !
