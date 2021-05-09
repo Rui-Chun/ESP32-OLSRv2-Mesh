@@ -19,6 +19,9 @@
 #define HELLO_INTERVAL_TICKS 3
 #define TC_VALIDITY_TICKS 20
 #define TC_INTERVAL_TICKS 5
+
+#define RC_INTERVAL_TICKS 5     // the interval to perform routing path calculation
+
 #define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
 
 #define TC_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
@@ -136,5 +139,6 @@ uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id);
 void update_mpr_status ();
 void check_entry_validity();
 void update_id_lists();
+void compute_routing_set();
 
 #endif

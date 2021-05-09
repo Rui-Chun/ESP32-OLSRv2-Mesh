@@ -1,6 +1,5 @@
 /*  routing_set.c
     Algorithm for Calculating the Routing Set and TC msg
-    This file try to follow the algorithm described in RFC7181 Appendix C.(a variation of Dijkstra’s algorithm)
     To separate this part of code from info_base.c, so each file does not get too long.
 */
 
@@ -10,12 +9,101 @@
 static const char *TAG = "espnow_routing_set";
 
 // label the usage of routing info (for Dijkstra’s), only valid for routing MPR nodes
-// 0 -> NULL, not routing MPR; 1 -> unused info; -1 -> used info
-// NOTE: this is int !
-static int8_t routing_info_usage[MAX_PEER_NUM];
+// 0 -> NULL, not a node; positive -> metric value of unused node; -1 -> used node
+// NOTE: this is int values.
+// do not use #0, use [1, peer_num]
+static int16_t routing_metric_list[MAX_PEER_NUM];
 
 /*Routing related functions*/
 
+// find the min metric in routing_metric_list, return 0 if all used.
+uint8_t find_min_metric () {
+    uint8_t min_node_id = 0;
+    uint8_t min_metric = 255;
+    for(int p = 1; p <= peer_num; p++) { // do not use #0, use [1, peer_num]
+        ESP_LOGI(TAG, "#%d, metric %d", p, routing_metric_list[p]);
+        if (routing_metric_list[p] <= 0) continue;
+        if (routing_metric_list[p] < min_metric) {
+            min_metric = routing_metric_list[p];
+            min_node_id = p;
+        }
+    }
+    return min_node_id;
+}
+
+static inline link_info_t get_link_info (uint8_t node_id) {
+    assert(entry_ptr_list[node_id] != NULL);
+    if ( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY ) {
+        return ((neighbor_entry_t*)entry_ptr_list[node_id])->link_info;
+    }
+    else {
+        return ((remote_node_entry_t*)entry_ptr_list[node_id])->link_info;
+    }
+}
+
+static inline routing_info_t* get_routing_info_ptr (uint8_t node_id) {
+    assert(entry_ptr_list[node_id] != NULL);
+    if ( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY ) {
+        return &( ((neighbor_entry_t*)entry_ptr_list[node_id])->routing_info );
+    }
+    else {
+        return &( ((remote_node_entry_t*)entry_ptr_list[node_id])->routing_info );
+    }
+}
+
+// This function tries to follow the algorithm described in RFC7181 Appendix C.(a variation of Dijkstra’s algorithm)
+void compute_routing_set () {
+    if (peer_num <= 1) return;  
+    // 1. loop over and set all the flags
+    routing_metric_list[0] = -1;
+    for(int p = 1; p <= peer_num; p++) { // do not use #0, use [1, peer_num]
+        if (entry_ptr_list[p] != NULL) {
+            routing_metric_list[p] = 255;
+            // init update, assign neighbor's metric values.
+            if ( ((uint8_t*)entry_ptr_list[p])[0] == NEIGHBOR_ENTRY ) {
+                routing_metric_list[p] = ((neighbor_entry_t*)entry_ptr_list[p])->link_metric;
+            }
+        }
+    }
+    // 2. run Dijkstra
+    uint8_t new_node_id = 0;
+    link_info_t new_link_info;
+    routing_info_t* new_routing_ptr = NULL;
+    while (1) {
+        // (1) find the node with min metric, break if all used.
+        new_node_id = find_min_metric();
+        ESP_LOGI(TAG, "Updating with #%d", new_node_id);
+        if (new_node_id == 0) break;
+        // (2) update metric list with its link info. 
+        //     we need to update all routing_info of linked unused nodes.
+        // get link info
+        new_link_info = get_link_info(new_node_id);
+        new_routing_ptr = get_routing_info_ptr(new_node_id);
+        // update all linked unused nodes.
+        uint8_t linked_id = 0;
+        routing_info_t* linked_routing_ptr = NULL;
+        for(int l=0; l < new_link_info.link_num; l++) {
+            linked_id = new_link_info.id_list_ptr[l];
+            if (routing_metric_list[linked_id] <=0 ) continue;
+            // update path if new path's metric is lower
+            if (routing_metric_list[new_node_id] + new_link_info.metric_list_ptr[l] < routing_metric_list[linked_id]) {
+                // udpate metric list
+                routing_metric_list[linked_id] = routing_metric_list[new_node_id] + new_link_info.metric_list_ptr[l];
+                // update link info
+                ESP_LOGI(TAG, "Updating linked node #%d routing info!", linked_id);
+                linked_routing_ptr = get_routing_info_ptr(linked_id);
+                linked_routing_ptr->next_hop = new_routing_ptr->next_hop;
+                linked_routing_ptr->hop_num = new_routing_ptr->hop_num + 1;
+                linked_routing_ptr->path_metric = new_routing_ptr->path_metric + new_link_info.metric_list_ptr[l];
+                assert(linked_routing_ptr->path_metric == routing_metric_list[linked_id]);
+            }
+        }
+        // (3) set the node as used node
+        routing_metric_list[new_node_id] = -1;
+    }
+    ESP_LOGW(TAG, "Routing calculation done.");
+    return;
+}
 
 
 /* TC Msg related functions */

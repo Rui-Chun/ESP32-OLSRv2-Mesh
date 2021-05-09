@@ -124,7 +124,11 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
             new_rfc_pkt.tc_msg_ptr = NULL;
         }
     }
-
+    // 3. compute routing paths
+    if (tick_num % RC_INTERVAL_TICKS == 0) {
+        compute_routing_set();
+    }
+    
     // gen raw pkt and send to event, only if there is msg
     if(new_rfc_pkt.pkt_len > RFC5444_PKT_HEADER_LEN) {
         new_raw_pkt = gen_raw_packet(new_rfc_pkt);
