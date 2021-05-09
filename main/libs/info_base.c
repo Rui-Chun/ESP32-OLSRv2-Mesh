@@ -664,7 +664,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     routing MPRs use incoming neighbor metrics. !
 */
 
-// TODO: change routing MPR to use incomming metrcs!!
+// TODO!: change routing MPR to use incomming metrcs!!
 
 
 // check whether this node id points to a symmetric two hop node.

@@ -11,13 +11,6 @@
 #include <string.h>
 #include "esp_log.h"
 
-// the packet bytes to be sent to or received from.
-typedef struct raw_pkt_t {
-    uint16_t pkt_len;
-    uint8_t *pkt_data;
-} raw_pkt_t;
-
-
 #define RFC5444_MAX_PKT_SIZE 1500
 #define RFC5444_MAX_MSG_NUM     3 // max num of msg in one packet
 #define RFC5444_ADDR_LEN        6 // we only consider mac address
@@ -28,6 +21,13 @@ typedef struct raw_pkt_t {
 #define MSG_FLAGS_HELLO         15   // indicating that the message header contains originator address, hop limit, hop count, and message sequence number fields.
 #define MSG_FLAGS_TC            15   
 #define MSG_ADDR_LEN            (RFC5444_ADDR_LEN - 1)
+
+// the packet bytes to be sent to or received from.
+typedef struct raw_pkt_t {
+    uint8_t mac_addr[RFC5444_ADDR_LEN]; // recv mac addr, not valid when sending
+    uint16_t pkt_len;
+    uint8_t *pkt_data;
+} raw_pkt_t;
 
 typedef enum {
     MSG_TYPE_HELLO = 1,

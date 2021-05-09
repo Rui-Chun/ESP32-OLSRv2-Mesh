@@ -275,6 +275,7 @@ static void espnow_olsr_task(void *pvParameter)
                     // this case does not involve pkt buf
                     // call olsr recv packet handler
                     raw_pkt_t recv_pkt;
+                    memcpy(recv_pkt.mac_addr, recv_cb_info->mac_addr, RFC5444_ADDR_LEN);
                     recv_pkt.pkt_len = recv_frame->len - sizeof(espnow_olsr_frame_t);
                     recv_pkt.pkt_data = recv_frame->payload;
                     // TODO: this is jsut a fake return value
@@ -328,6 +329,7 @@ static void espnow_olsr_task(void *pvParameter)
                     ESP_LOGI(TAG, "A new packet received, len = %d", recv_pkt_offset);
                     // call recv pkt handler
                     raw_pkt_t recv_pkt;
+                    memcpy(recv_pkt.mac_addr, recv_cb_info->mac_addr, RFC5444_ADDR_LEN);
                     recv_pkt.pkt_len = recv_pkt_offset;
                     recv_pkt.pkt_data = recv_pkt_buf;
                     // TODO: this is jsut a fake return value

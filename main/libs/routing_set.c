@@ -80,9 +80,8 @@ void parse_tc_addr_block(remote_node_entry_t* remote_entry_ptr, tc_msg_t* tc_msg
     uint8_t sender_selector_id = 0; // here means the selector of the TC msg sender
     for(int l=0; l < link_num; l++) {
         link_addr_ptr = tc_msg_ptr->addr_block_ptr->addr_list + l * RFC5444_ADDR_LEN;
-        // it should not point to me
-        assert(memcmp(link_addr_ptr, originator_addr, RFC5444_ADDR_LEN) != 0);
-        
+        // if points to my self, skip it
+        if (memcmp(link_addr_ptr, originator_addr, RFC5444_ADDR_LEN) == 0) continue;
         // if we have seen this node before.
         if( get_or_create_id(link_addr_ptr, &sender_selector_id) ) {
             // store this id
@@ -109,12 +108,33 @@ void parse_tc_addr_block(remote_node_entry_t* remote_entry_ptr, tc_msg_t* tc_msg
 
 }
 
+// return 1 if mac_addr belongs to one of the flooding selectors.
+uint8_t is_flooding_selector_mac (uint8_t mac_addr[RFC5444_ADDR_LEN]) {
+    uint8_t node_id = 0;
+    for(int p = 1; p <= peer_num; p++) { // do not use #0, use [1, peer_num]
+        if (memcmp(peer_addr_list[p], mac_addr, RFC5444_ADDR_LEN) == 0) {
+            // a match in the list.
+            node_id = p;
+            break;
+        }
+    }
+    if (node_id == 0 || entry_ptr_list[node_id] == NULL || ((uint8_t*)entry_ptr_list[node_id])[0] != NEIGHBOR_ENTRY) {
+        // no match
+        return 0;
+    }
+    neighbor_entry_t* tmp_neighbor_ptr = (neighbor_entry_t*)entry_ptr_list[node_id];
+    if (tmp_neighbor_ptr->flooding_status == FLOODING_FROM || tmp_neighbor_ptr->flooding_status == FLOODING_TO_FROM) {
+        return 1;
+    }
+    return 0;
+}
+
 
 // NOTE:(flooding reduction)
-//      TODO!:only forward this msg if it comes from one of your flooding MPR selectors.
+//      only forward this msg if it is recvived from one of your flooding MPR selectors.
 //      also check the msg_num to make sure msg is fresh. And add hop_count by 1.
 // return 0 to indicate handler not to forward.
-uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
+uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr, uint8_t recv_mac[RFC5444_ADDR_LEN]) {
     assert(tc_msg_ptr != NULL);
     ESP_LOGI(TAG, "Start to parse TC msg.");
 
@@ -122,6 +142,11 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
     uint8_t remote_id = 0;
     remote_node_entry_t* tc_remote_entry_ptr = NULL; // remote entry and two-hop entry are inter-changeable.
     uint8_t* tc_orig_addr = tc_msg_ptr->header.msg_orig_addr;
+
+    // do not parse if this msg is from self
+    if ( memcmp(tc_orig_addr, originator_addr, RFC5444_ADDR_LEN) == 0 ) {
+        return 0;
+    }
 
     // 1. check and update peer_list and entry_list
     if (get_or_create_id(tc_orig_addr, &remote_id)) {
@@ -131,7 +156,7 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
         switch (unknown_entry[0]) {
             case NEIGHBOR_ENTRY: {
                 // we already know the links of all neighbors, do not process the TC msg, just forward if needed.
-                ESP_LOGI(TAG, "TC msg is from a familiar neighbor node! Nothing will be done.");
+                ESP_LOGI(TAG, "TC msg is from a familiar neighbor node!");
                 neighbor_entry_t* hello_neighbor_entry = (neighbor_entry_t*) unknown_entry;
                 // check TC msg seq_num
                 // if the node restarts, do not drop the packet.
@@ -140,8 +165,19 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
                     // do not forward this msg
                     return 0;
                 }
-                // otherwise, done parsing, forward this msg
+                // otherwise, update msg seq num
                 hello_neighbor_entry->msg_seq_num = tc_msg_ptr->header.msg_seq_num;
+                // check TC msg hop limit
+                tc_msg_ptr->header.msg_hop_count += 1;
+                if (tc_msg_ptr->header.msg_hop_count >= tc_msg_ptr->header.msg_hop_limit) {
+                    return 0;
+                }
+                // check whether flooding MPR
+                if (!is_flooding_selector_mac(recv_mac)) {
+                    return 0;
+                }
+                // done parsing, forward this msg
+                ESP_LOGI(TAG, "TC msg should be forwarded.");
                 return 1;
                 break;
             }
@@ -160,7 +196,8 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
                 break;
             }
         }
-    } else {
+    } 
+    else {
         // a new remote node.
         ESP_LOGI(TAG, "A new remote MPR node is heard! addr = "MACSTR" .", MAC2STR(tc_orig_addr));
         tc_remote_entry_ptr = register_new_remote(remote_id);
@@ -175,6 +212,7 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
     }
     // update seq_num
     tc_remote_entry_ptr->msg_seq_num = tc_msg_ptr->header.msg_seq_num;
+
     uint8_t* tmp_value_ptr = NULL;
     // TODO: does remote node need this MPR willing field?
     // assert( get_tlv_value(tc_msg_ptr->msg_tlv_block_ptr, IS_MPR_WILLING, &tmp_value_ptr) == 1 );
@@ -184,12 +222,24 @@ uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr) {
     // update MPR status
     tc_remote_entry_ptr->routing_status = ROUTING_TO;
     
-    // update link info, TODO: also add remote node entries!
+    // update link info, also add remote node entries!
     parse_tc_addr_block(tc_remote_entry_ptr, tc_msg_ptr, tc_remote_entry_ptr->valid_until);
 
     // update id_lists, to keep them correct
     update_id_lists();
-    return;
+
+    // update and check TC msg hop limit
+    tc_msg_ptr->header.msg_hop_count += 1;
+    if (tc_msg_ptr->header.msg_hop_count >= tc_msg_ptr->header.msg_hop_limit) {
+        return 0;
+    }
+    // check whether flooding MPR
+    if (!is_flooding_selector_mac(recv_mac)) {
+        return 0;
+    }
+    // done parsing, forward this msg
+    ESP_LOGI(TAG, "TC msg should be forwarded.");
+    return 1;
 }
 
 // return the number of routing MPR selectors
