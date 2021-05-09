@@ -14,7 +14,11 @@ static const char *TAG = "espnow_routing_set";
 // NOTE: this is int !
 static int8_t routing_info_usage[MAX_PEER_NUM];
 
+/*Routing related functions*/
 
+
+
+/* TC Msg related functions */
 remote_node_entry_t* register_new_remote(uint8_t node_id) {
     if (node_id == 0 ) {
         ESP_LOGW(TAG, "Do not register peer #0!");

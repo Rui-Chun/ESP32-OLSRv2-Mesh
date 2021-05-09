@@ -243,6 +243,16 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]) {
     ESP_LOGI(TAG, "init done, mac addr =  "MACSTR".", MAC2STR(originator_addr));
 }
 
+void print_link_info(link_info_t target_link_info) {
+    printf("\tlink_info : ");
+    for (int l=0; l < target_link_info.link_num; l++) {
+        // print link -> node_id, out metric , in metric
+        printf("#%d oi_metric(%d, %d), ", target_link_info.id_list_ptr[l],\
+                target_link_info.metric_list_ptr[l], target_link_info.in_metric_list_ptr[l]);
+    }
+    printf("\n");
+}
+
 // print info baesd on id_lists and entry_ptr_list.
 void print_topology_set () {
     ESP_LOGI(TAG, "");
@@ -250,24 +260,37 @@ void print_topology_set () {
     uint8_t node_id = 0; // peer equals with node.
     neighbor_entry_t* neighbor_ptr = NULL;
     two_hop_entry_t* two_hop_ptr = NULL;
+    remote_node_entry_t* remote_ptr = NULL;
+    printf("Neighbors :\n");
     for(int n=0; n < neighbor_id_num; n++) {
         node_id = neighbor_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == NEIGHBOR_ENTRY);
         neighbor_ptr = entry_ptr_list[node_id];
-        printf("Neighbor:\tnode id = #%d: "MACSTR" \t link_status = %d, routing next_hop = #%d\n", node_id, MAC2STR(peer_addr_list[node_id]), neighbor_ptr->link_status, neighbor_ptr->routing_info.next_hop);
-        printf("\tMPR status = (%d, %d), \tout_metric = %d, in_metric = %d \n", neighbor_ptr->flooding_status, neighbor_ptr->routing_status, neighbor_ptr->link_metric, neighbor_ptr->in_link_metric);
+        printf("\tNode id = #%d: "MACSTR", link_status = %d, routing next_hop = #%d\n",\
+                node_id, MAC2STR(peer_addr_list[node_id]), neighbor_ptr->link_status, neighbor_ptr->routing_info.next_hop);
+        printf("\tMPR status = (%d, %d), out_metric = %d, in_metric = %d \n",\
+                neighbor_ptr->flooding_status, neighbor_ptr->routing_status, neighbor_ptr->link_metric, neighbor_ptr->in_link_metric);
+        print_link_info(neighbor_ptr->link_info);
     }
+    printf("TWO_HOPs :\n");
     for(int n=0; n < two_hop_id_num; n++) {
         node_id = two_hop_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == TWO_HOP_ENTRY);
-        printf("TWO_HOP: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+        printf("\tNode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
         two_hop_ptr = entry_ptr_list[node_id];
-        printf(" \trouting next hop = #%d \n", two_hop_ptr->routing_info.next_hop);
+        printf(" \trouting next hop = #%d, hop_num = %d, path_metric = %d \n",\
+                    two_hop_ptr->routing_info.next_hop, two_hop_ptr->routing_info.hop_num, two_hop_ptr->routing_info.path_metric);
+        print_link_info(two_hop_ptr->link_info);
     }
+    printf("REMOTEs: \n");
     for(int n=0; n < remote_id_num; n++) {
         node_id = remote_id_list[n];
         assert( ((uint8_t*)entry_ptr_list[node_id])[0] == REMOTE_NODE_ENTRY);
-        printf("REMOTE: \tnode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+        printf("\tNode id = #%d: "MACSTR" \n", node_id, MAC2STR(peer_addr_list[node_id]));
+        remote_ptr = entry_ptr_list[node_id];
+        printf(" \trouting next hop = #%d, hop_num = %d, path_metric = %d \n",\
+                    remote_ptr->routing_info.next_hop, remote_ptr->routing_info.hop_num, remote_ptr->routing_info.path_metric);
+        print_link_info(remote_ptr->link_info);
     }
     printf("Done printing topology info.\n");
     ESP_LOGI(TAG, "");
