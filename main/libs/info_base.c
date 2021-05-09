@@ -5,33 +5,33 @@ static const char *TAG = "espnow_info_base";
 // static variables should be init as zeros by the compiler.
 
 // message seq num, to indicate a new msg
-static uint32_t global_msg_seq_num = 0;
+uint32_t global_msg_seq_num = 0;
 
-static uint32_t global_tick_num = 0; // time counter based on tick
+uint32_t global_tick_num = 0; // time counter based on tick
 
 // do not use #0, use [1, peer_num]
 // for example, 'for(int n=1; n <= peer_num; n++)'
-static uint8_t peer_num = 0; // 255 should be enough.
+uint8_t peer_num = 0; // 255 should be enough.
 
 // a static list for all peer nodes' addresses.
 // Note: We use peer_id #0 to mark empty or originator(self)!
-static uint8_t peer_addr_list[MAX_PEER_NUM][RFC5444_ADDR_LEN]; // use peer_id to get mac address.
-static void* entry_ptr_list[MAX_PEER_NUM];
+uint8_t peer_addr_list[MAX_PEER_NUM][RFC5444_ADDR_LEN]; // use peer_id to get mac address.
+void* entry_ptr_list[MAX_PEER_NUM];
 
 // Neighbor Information Base
 // info is stored in entries, get it from entry ptr list.
-static uint8_t neighbor_id_num = 0;
-static uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM];
-static uint8_t two_hop_id_num = 0;
-static uint8_t two_hop_id_list[MAX_PEER_NUM];
+uint8_t neighbor_id_num = 0;
+uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM];
+uint8_t two_hop_id_num = 0;
+uint8_t two_hop_id_list[MAX_PEER_NUM];
 
 // Topology Information Base
 // get remote_node_entry for the info !
 // 1. A Routable Address Topology Set
 // 2. A Router Topology Set, recording links between routers in the MANET
 // 3. A Routing Set, recording routes from this router to all available destinations.
-static uint8_t remote_id_num = 0;
-static uint8_t remote_id_list[MAX_PEER_NUM];
+uint8_t remote_id_num = 0;
+uint8_t remote_id_list[MAX_PEER_NUM];
 // TODO: 
 // 3. An Attached Network Set, recording a gateway
 
@@ -39,7 +39,7 @@ static uint8_t remote_id_list[MAX_PEER_NUM];
 // this has been moved to node entry, msg_seq_num field.
 
 // Local Information Base: Originator address / my own address
-static uint8_t originator_addr[RFC5444_ADDR_LEN];
+uint8_t originator_addr[RFC5444_ADDR_LEN];
 
 /* Helper functions */
 
@@ -85,6 +85,10 @@ neighbor_entry_t* register_new_neighbor(uint8_t new_neighbor_id) {
     // MUST set link metric as INF at init stage
     ret_entry->link_metric = 255;
     ret_entry->in_link_metric = 255;
+    // set neighbor's routing info
+    ret_entry->routing_info.next_hop = 0;
+    ret_entry->routing_info.hop_num = 255;
+    ret_entry->routing_info.path_metric = 255;
     // register the entry to the entry list
     entry_ptr_list[new_neighbor_id] = ret_entry;
 
@@ -109,6 +113,10 @@ two_hop_entry_t* register_new_two_hop(uint8_t new_two_hop_id) {
     ret_entry->entry_type = TWO_HOP_ENTRY;
     ret_entry->peer_id = new_two_hop_id;
     // TODO: do we need to assign link status?
+    // MUST set link metric as INF at init stage
+    ret_entry->routing_info.next_hop = 0;
+    ret_entry->routing_info.hop_num = 255;
+    ret_entry->routing_info.path_metric = 255;
     // register the entry to the entry list
     entry_ptr_list[new_two_hop_id] = ret_entry;
 
@@ -320,6 +328,10 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
             neighbor_entry_ptr->link_metric = link_metric_tlv_ptr->tlv_value[link_num + l];
             // TODO: define a reasonable in link metric
             neighbor_entry_ptr->in_link_metric = 1;
+            // update routing info since we have a symmetric link now.
+            neighbor_entry_ptr->routing_info.next_hop = neighbor_entry_ptr->peer_id;
+            neighbor_entry_ptr->routing_info.hop_num = 1;
+            neighbor_entry_ptr->routing_info.path_metric = neighbor_entry_ptr->link_metric;
             // update MPR info
             // if this node chooses me as the routing MPR.
             if (mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO || mpr_status_tlv_ptr->tlv_value[l*2] == FLOODING_TO_FROM) {
@@ -376,7 +388,7 @@ void parse_hello_addr_block(neighbor_entry_t* neighbor_entry_ptr, hello_msg_t* h
 }
 
 void parse_hello_msg (hello_msg_t* hello_msg_ptr) {
-    // TODO: update info bases based on HELLO
+    // update info bases based on HELLO
     ESP_LOGI(TAG, "Start to parse HELLO msg.");
     // get msg originator address.
     uint8_t neighbor_id = 0;
@@ -501,7 +513,7 @@ void gen_hello_msg_tlv (tlv_block_t* msg_tlv_block_ptr) {
 
 // this function assumes that hello msg has got mem allocated.
 void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
-    if(hello_msg_ptr == NULL) return;
+    assert(hello_msg_ptr != NULL);
 
     // assign values to the header.
     msg_header_t* header_ptr = &hello_msg_ptr->header;
@@ -646,7 +658,16 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     print_topology_set();
 }
 
-// check whether this node id points to a two hop node.
+/* MPR selection Algorithm 
+    this is according to the example MPR Selection Algorithm in RFC7181 Appendix B.2
+    When flooding MPRs use metrics, these are outgoing link metrics;
+    routing MPRs use incoming neighbor metrics. !
+*/
+
+// TODO: change routing MPR to use incomming metrcs!!
+
+
+// check whether this node id points to a symmetric two hop node.
 uint8_t is_two_hop_node (uint8_t node_id) {
     // There are a few possibilities.
     // 1. it is zero, which means emtpy node_id. 2. the entry pointer is NULL, it just got deleted!

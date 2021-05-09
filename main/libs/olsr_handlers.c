@@ -24,8 +24,9 @@ espnow_olsr_event_t olsr_recv_pkt_handler(raw_pkt_t recv_pkt) {
     // 2. handle possible TC msg
     if (recv_rfc_pkt.tc_msg_ptr != NULL) {
         // update info base given TC msg
-        parse_tc_msg(recv_rfc_pkt.tc_msg_ptr);
-        // TODO: we need to forward this TC msg
+        if(parse_tc_msg(recv_rfc_pkt.tc_msg_ptr)) {
+            // TODO!: we need to forward this TC msg
+        }
     }
 
     // MUST free all mem
@@ -82,8 +83,12 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
         }
         memset(new_rfc_pkt.tc_msg_ptr, 0, sizeof(tc_msg_t));
         // generate tc msg content
-        gen_tc_msg(new_rfc_pkt.tc_msg_ptr);
-        new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.tc_msg_ptr->header.msg_size;     
+        if( gen_tc_msg(new_rfc_pkt.tc_msg_ptr) ) {
+            new_rfc_pkt.pkt_len += sizeof(msg_header_t) + new_rfc_pkt.tc_msg_ptr->header.msg_size;    
+        } else {
+            free(new_rfc_pkt.tc_msg_ptr);
+            new_rfc_pkt.tc_msg_ptr = NULL;
+        }
     }
 
     // gen raw pkt and send to event, only if there is msg

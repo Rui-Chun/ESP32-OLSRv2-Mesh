@@ -188,6 +188,66 @@ uint16_t copy_to_hello_msg(uint8_t* msg_data, hello_msg_t* hello_msg_ptr) {
     return offset;
 }
 
+// copy the content of msg_data to tc_msg and return the num of bytes copied.
+// this function requires the mem is allocated for tc_msg alraedy.
+uint16_t copy_to_tc_msg(uint8_t* msg_data, tc_msg_t* tc_msg_ptr) {
+    uint16_t offset = 0;
+    uint16_t tmp_len = 0;
+    uint8_t* dst_ptr = (uint8_t*) tc_msg_ptr;
+    if (msg_data == NULL || dst_ptr == NULL) {
+        ESP_LOGW(TAG, "NULL data input!");
+        return 0;
+    }
+    // copy TC msg
+    // 1. copy tc msg header
+    memcpy(dst_ptr, msg_data, sizeof(msg_header_t));
+    offset += sizeof(msg_header_t);
+    // we assume that all blocks exist in this msg
+    // 2. copy all the blocks (alloc mem first)
+    // (1) copy msg_tlv block
+    tlv_block_t* tmp_tlv_block_ptr = (tlv_block_t*)(msg_data + offset);
+    // this length is special since we store a list of pointers instead of tlv data.
+    tmp_len = sizeof(tlv_block_t) + tmp_tlv_block_ptr->tlv_ptr_len * sizeof(tlv_t*);
+    tc_msg_ptr->msg_tlv_block_ptr = malloc(tmp_len);
+    if (tc_msg_ptr->msg_tlv_block_ptr == NULL) {
+        ESP_LOGE(TAG, "No mem for tlv_block!");
+        return 0;
+    }
+    memset(tc_msg_ptr->msg_tlv_block_ptr, 0, tmp_len);
+    // copy the msg_tlv block
+    offset += copy_to_tlv_block(msg_data + offset, tc_msg_ptr->msg_tlv_block_ptr);
+    // (2) copy the addr block
+    addr_block_t* tmp_addr_block_ptr = (addr_block_t*)(msg_data + offset);
+    tmp_len = get_addr_block_len(tmp_addr_block_ptr);
+    tc_msg_ptr->addr_block_ptr = malloc(tmp_len);
+    if (tc_msg_ptr->addr_block_ptr == NULL) {
+        ESP_LOGE(TAG, "No mem for addr_block!");
+        free(tc_msg_ptr->msg_tlv_block_ptr);
+        return 0;
+    }
+    memcpy(tc_msg_ptr->addr_block_ptr, msg_data + offset, tmp_len);
+    offset += tmp_len;
+    // (3) copy addr tlv block
+    tmp_tlv_block_ptr = (tlv_block_t*)(msg_data + offset);
+    // this length is special since we store a list of pointers instead of tlv data.
+    tmp_len = sizeof(tlv_block_t) + tmp_tlv_block_ptr->tlv_ptr_len * sizeof(tlv_t*);
+    tc_msg_ptr->addr_tlv_block_ptr = malloc(tmp_len);
+    if (tc_msg_ptr->addr_tlv_block_ptr == NULL) {
+        ESP_LOGE(TAG, "No mem for addr tlv_block!");
+        free(tc_msg_ptr->msg_tlv_block_ptr);
+        free(tc_msg_ptr->addr_block_ptr);
+        return 0;
+    }
+    memset(tc_msg_ptr->addr_tlv_block_ptr, 0, tmp_len);
+    // copy the addr_tlv block
+    offset += copy_to_tlv_block(msg_data + offset, tc_msg_ptr->addr_tlv_block_ptr);
+
+    // 3. check offset
+    assert(offset == sizeof(msg_header_t) + tc_msg_ptr->header.msg_size);
+    return offset;
+}
+
+
 void free_rfc5444_pkt (rfc5444_pkt_t pkt) {
     // free possible hello msg
     if (pkt.hello_msg_ptr != NULL) {
@@ -202,11 +262,11 @@ void free_rfc5444_pkt (rfc5444_pkt_t pkt) {
     }
     // free possible tc msg
     if (pkt.tc_msg_ptr != NULL) {
-        if (pkt.hello_msg_ptr->msg_tlv_block_ptr != NULL)
+        if (pkt.tc_msg_ptr->msg_tlv_block_ptr != NULL)
             free_tlv_block(pkt.tc_msg_ptr->msg_tlv_block_ptr);
-        if (pkt.hello_msg_ptr->addr_block_ptr != NULL)
+        if (pkt.tc_msg_ptr->addr_block_ptr != NULL)
             free(pkt.tc_msg_ptr->addr_block_ptr);
-        if (pkt.hello_msg_ptr->addr_tlv_block_ptr != NULL)
+        if (pkt.tc_msg_ptr->addr_tlv_block_ptr != NULL)
             free_tlv_block(pkt.tc_msg_ptr->addr_tlv_block_ptr);
         // free msg struct after free all blocks
         free(pkt.tc_msg_ptr);
@@ -241,31 +301,41 @@ rfc5444_pkt_t parse_raw_packet (raw_pkt_t raw_packet) {
         return ret_pkt;
     }
 
-    // get msg_type
-    // TODO: we only consider one msg in a packet for now.
-    switch ((msg_type_t)raw_pkt_ptr[pkt_offset]) {
-        case MSG_TYPE_HELLO: {
-            // parse HELLO msg
-            ret_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
-            if(ret_pkt.hello_msg_ptr == NULL) {
-                ESP_LOGE(TAG, "No mem for hello msg!");
-                return ret_pkt;
+    // loop to parse all msg in one packet.
+    while(pkt_offset < ret_pkt.pkt_len) {
+        // get msg_type
+        switch ((msg_type_t)raw_pkt_ptr[pkt_offset]) {
+            case MSG_TYPE_HELLO: {
+                // parse HELLO msg
+                ret_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
+                if(ret_pkt.hello_msg_ptr == NULL) {
+                    ESP_LOGE(TAG, "No mem for hello msg!");
+                    return ret_pkt;
+                }
+                memset(ret_pkt.hello_msg_ptr, 0, sizeof(hello_msg_t));
+                // copy to hello msg and move offset.
+                pkt_offset += copy_to_hello_msg(raw_pkt_ptr + pkt_offset, ret_pkt.hello_msg_ptr);
+                break;
             }
-            memset(ret_pkt.hello_msg_ptr, 0, sizeof(hello_msg_t));
-            // copy to hello msg and move offset.
-            pkt_offset += copy_to_hello_msg(raw_pkt_ptr + pkt_offset, ret_pkt.hello_msg_ptr);
-            break;
-        }
-        case MSG_TYPE_TC: {
-            // TODO: parse TC msg
-            break;
-        }
-        default: {
-            ESP_LOGW(TAG, "Unknown msg type = %d !", raw_pkt_ptr[pkt_offset]);
-            break;
+            case MSG_TYPE_TC: {
+                // parse TC msg
+                ret_pkt.tc_msg_ptr = malloc(sizeof(tc_msg_t));
+                if(ret_pkt.tc_msg_ptr == NULL) {
+                    ESP_LOGE(TAG, "No mem for TC msg!");
+                    return ret_pkt;
+                }
+                memset(ret_pkt.tc_msg_ptr, 0, sizeof(tc_msg_t));
+                // copy to hello msg and move offset.
+                pkt_offset += copy_to_tc_msg(raw_pkt_ptr + pkt_offset, ret_pkt.tc_msg_ptr);
+                break;
+            }
+            default: {
+                ESP_LOGW(TAG, "Unknown msg type = %d !", raw_pkt_ptr[pkt_offset]);
+                break;
+            }
         }
     }
-
+    assert(pkt_offset == ret_pkt.pkt_len);
     return ret_pkt; // user of this pkt must free it.
 }
 
@@ -307,8 +377,21 @@ raw_pkt_t gen_raw_packet (rfc5444_pkt_t rfc5444_pkt) {
     }
     // assign possible tc msg
     if (rfc5444_pkt.tc_msg_ptr != NULL) {
-        // TODO:
-        ESP_LOGW(TAG, "TC msg not supported yet!");
+        // copy header
+        memcpy(ret_pkt.pkt_data + pkt_offset, (uint8_t*)(rfc5444_pkt.tc_msg_ptr), sizeof(msg_header_t));
+        pkt_offset += sizeof(msg_header_t);
+        // double check msg type
+        assert(rfc5444_pkt.tc_msg_ptr->header.msg_type == MSG_TYPE_TC);
+        // copy blocks
+        // 1. copy msg_tlv_block
+        pkt_offset += \
+            copy_from_tlv_block(ret_pkt.pkt_data + pkt_offset, rfc5444_pkt.tc_msg_ptr->msg_tlv_block_ptr);
+        // 2. copy addr_block
+        pkt_offset += \
+            copy_from_addr_block(ret_pkt.pkt_data + pkt_offset, rfc5444_pkt.tc_msg_ptr->addr_block_ptr);
+        // 3. copy addr_tlv_block
+        pkt_offset += \
+            copy_from_tlv_block(ret_pkt.pkt_data + pkt_offset, rfc5444_pkt.tc_msg_ptr->addr_tlv_block_ptr);        
     }
 
     // check pkt offset to make sure pkt len is correct.

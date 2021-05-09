@@ -21,6 +21,8 @@
 #define TC_INTERVAL_TICKS 5
 #define IS_MPR_WILLING       1   // Is current node willing to work as MPR node?
 
+#define TC_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
+#define TC_ADDR_TLV_NUM    1  // number of TLV entries in addr_tlv_block
 #define HELLO_MSG_TLV_NUM    3   // number of TLV entries in msg_tlv_block
 #define HELLO_ADDR_TLV_NUM    3  // number of TLV entries in addr_tlv_block
 /* Protocol Parameters and Constants End */
@@ -30,7 +32,20 @@
 #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
 #endif
 
-// #define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, RFC5444_ADDR_LEN) == 0)
+/* extern variables to share with routing_set.c */
+extern uint32_t global_msg_seq_num;
+extern uint32_t global_tick_num; // time counter based on tick
+extern uint8_t peer_num; // 255 should be enough.
+extern uint8_t peer_addr_list[MAX_PEER_NUM][RFC5444_ADDR_LEN]; // use peer_id to get mac address.
+extern void* entry_ptr_list[MAX_PEER_NUM];
+extern uint8_t neighbor_id_num;
+extern uint8_t neighbor_id_list[MAX_NEIGHBOUR_NUM];
+extern uint8_t two_hop_id_num;
+extern uint8_t two_hop_id_list[MAX_PEER_NUM];
+extern uint8_t remote_id_num;
+extern uint8_t remote_id_list[MAX_PEER_NUM];
+extern uint8_t originator_addr[RFC5444_ADDR_LEN];
+
 
 typedef enum link_status_t {
     LINK_HEARD = 0,
@@ -115,9 +130,11 @@ void info_base_init (uint8_t mac[RFC5444_ADDR_LEN]);
 void set_info_base_time (uint32_t tick);
 void parse_hello_msg (hello_msg_t* hello_msg_ptr);
 void gen_hello_msg (hello_msg_t* hello_msg_ptr);
-void parse_tc_msg (tc_msg_t* tc_msg_ptr);
-void gen_tc_msg (tc_msg_t* tc_msg_ptr);
+uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr);
+uint8_t gen_tc_msg (tc_msg_t* tc_msg_ptr);
+uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id);
 void update_mpr_status ();
 void check_entry_validity();
+void update_id_lists();
 
 #endif
