@@ -87,7 +87,8 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
         // check validity and delete timeout entries
         check_entry_validity();
         // update flooding and routing MPR
-        update_mpr_status();
+        update_mpr_status(0);
+        update_mpr_status(1);
         // generate and prepare hello msg
         new_rfc_pkt.hello_msg_ptr = malloc(sizeof(hello_msg_t));
         if (new_rfc_pkt.hello_msg_ptr == NULL) {
@@ -106,7 +107,8 @@ espnow_olsr_event_t olsr_timer_handler(uint32_t tick_num) {
             // check validity and delete timeout entries
             check_entry_validity();
             // update flooding and routing MPR
-            update_mpr_status();
+            update_mpr_status(0);
+            update_mpr_status(1);
         }
         // generate and prepare TC msg
         new_rfc_pkt.tc_msg_ptr = malloc(sizeof(tc_msg_t));

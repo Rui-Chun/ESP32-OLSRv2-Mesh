@@ -687,8 +687,6 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr) {
     routing MPRs use incoming neighbor metrics. !
 */
 
-// TODO!: change routing MPR to use incomming metrcs!!
-
 
 // check whether this node id points to a symmetric two hop node.
 uint8_t is_two_hop_node (uint8_t node_id) {
@@ -707,7 +705,8 @@ uint8_t is_two_hop_node (uint8_t node_id) {
 }
 
 // compute the min metric to get to two-hop nodes
-void compute_min_metric (uint8_t* min_metric_list) {
+// if mpr_flag == 0, then flooding MPR (outgoing metric); otherwise, routing MPR(incoming metric)
+void compute_min_metric (uint8_t* min_metric_list, uint8_t mpr_flag) {
     uint8_t neighbor_id = 0;
     neighbor_entry_t* neighbor_ptr = NULL;
     uint8_t two_hop_id = 0;
@@ -724,7 +723,13 @@ void compute_min_metric (uint8_t* min_metric_list) {
                 continue;
             }
             // update min
-            uint16_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+            uint16_t tmp_metric = 0;
+            if (mpr_flag == 0) {
+                tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+            }
+            else {
+                tmp_metric = neighbor_ptr->in_link_metric + neighbor_ptr->link_info.in_metric_list_ptr[l];
+            }
             if (tmp_metric < min_metric_list[two_hop_id]) {
                 min_metric_list[two_hop_id] = tmp_metric;
             }
@@ -733,7 +738,8 @@ void compute_min_metric (uint8_t* min_metric_list) {
 }
 
 // assign the min metric according the new mpr's link info
-void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_mpr_id) {
+// if mpr_flag == 0, then flooding MPR (outgoing metric); otherwise, routing MPR(incoming metric)
+void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_mpr_id, uint8_t mpr_flag) {
     ESP_LOGI(TAG, "Updating new MPR #%d .", new_mpr_id);
     neighbor_entry_t* neighbor_ptr = entry_ptr_list[new_mpr_id];
     assert(neighbor_ptr !=  NULL);
@@ -746,7 +752,13 @@ void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_m
             continue;
         }
         // update metric list
-        uint16_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+        uint16_t tmp_metric = 0;
+        if (mpr_flag == 0) {
+            tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+        }
+        else {
+            tmp_metric = neighbor_ptr->in_link_metric + neighbor_ptr->link_info.in_metric_list_ptr[l];
+        }
         if (metric_list[two_hop_id] > tmp_metric) {
             metric_list[two_hop_id] = tmp_metric;
             // udpate mpr list
@@ -756,10 +768,17 @@ void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_m
 }
 
 // update MPR selection. We use the same selection for flooding and routing MPR.
-void record_mpr_selection (int16_t* potential_mpr_list, uint8_t* mpr_metric_list) {
+// if mpr_flag == 0, then flooding MPR; otherwise, routing MPR
+void record_mpr_selection (int16_t* potential_mpr_list, uint8_t* mpr_metric_list, uint8_t mpr_flag) {
     uint8_t neighbor_id = 0;
     neighbor_entry_t* neighbor_ptr = NULL;
     two_hop_entry_t* two_hop_ptr = NULL;
+    if (mpr_flag == 0) { 
+        ESP_LOGI(TAG, "Recording Flooding MPR.");
+    }
+    else {
+        ESP_LOGI(TAG, "Recording Routing MPR.");
+    }
     for (int x=0; x < two_hop_id_num; x++) {
         // simple check
         assert(potential_mpr_list[two_hop_id_list[x]] >= 0);
@@ -770,37 +789,46 @@ void record_mpr_selection (int16_t* potential_mpr_list, uint8_t* mpr_metric_list
         // mark thie neighbor as MPR
         neighbor_id = potential_mpr_list[two_hop_id_list[x]];
         neighbor_ptr = entry_ptr_list[neighbor_id];
-        if (neighbor_ptr->flooding_status == NOT_FLOODING)
-            neighbor_ptr->flooding_status = FLOODING_TO;
-        if (neighbor_ptr->flooding_status == FLOODING_FROM)
-            neighbor_ptr->flooding_status = FLOODING_TO_FROM;
-        if (neighbor_ptr->routing_status == NOT_ROUTING)
-            neighbor_ptr->routing_status = ROUTING_TO;
-        if (neighbor_ptr->routing_status == ROUTING_FROM)
-            neighbor_ptr->routing_status = ROUTING_TO_FROM;
-        // record this two-hop node's routing path
-        two_hop_ptr = entry_ptr_list[two_hop_id_list[x]];
-        two_hop_ptr->routing_info.next_hop = neighbor_id;
-        two_hop_ptr->routing_info.hop_num = 2;
-        two_hop_ptr->routing_info.path_metric = mpr_metric_list[two_hop_id_list[x]];
+        // update flooding MPR, using out going metric so it gives the routing path as well.
+        if (mpr_flag == 0) {
+            if (neighbor_ptr->flooding_status == NOT_FLOODING)
+                neighbor_ptr->flooding_status = FLOODING_TO;
+            if (neighbor_ptr->flooding_status == FLOODING_FROM)
+                neighbor_ptr->flooding_status = FLOODING_TO_FROM;
+            // record this two-hop node's routing path, this may be reduntant since we compute routing later.
+            two_hop_ptr = entry_ptr_list[two_hop_id_list[x]];
+            two_hop_ptr->routing_info.next_hop = neighbor_id;
+            two_hop_ptr->routing_info.hop_num = 2;
+            two_hop_ptr->routing_info.path_metric = mpr_metric_list[two_hop_id_list[x]];
+        }
+        // update routing MPR
+        else {
+            if (neighbor_ptr->routing_status == NOT_ROUTING)
+                neighbor_ptr->routing_status = ROUTING_TO;
+            if (neighbor_ptr->routing_status == ROUTING_FROM)
+                neighbor_ptr->routing_status = ROUTING_TO_FROM;
+        }
     }
     // there may be asym neighbors
-    for (int n=0; n < neighbor_id_num; n++) {
-        // if asym link
-        if ( ((neighbor_entry_t*)entry_ptr_list[neighbor_id_list[n]])->link_status == LINK_HEARD ) {
-            // if there is a path.
-            if (potential_mpr_list[neighbor_id_list[n]] > 0) {
-                neighbor_entry_t* asym_neighbor_ptr = entry_ptr_list[neighbor_id_list[n]];
-                asym_neighbor_ptr->routing_info.next_hop = potential_mpr_list[neighbor_id_list[n]];
-                asym_neighbor_ptr->routing_info.hop_num = 2;
-                asym_neighbor_ptr->routing_info.path_metric = mpr_metric_list[neighbor_id_list[n]];
+    if (mpr_flag == 0) {
+        for (int n=0; n < neighbor_id_num; n++) {
+            // if asym link
+            if ( ((neighbor_entry_t*)entry_ptr_list[neighbor_id_list[n]])->link_status == LINK_HEARD ) {
+                // if there is a path.
+                if (potential_mpr_list[neighbor_id_list[n]] > 0) {
+                    neighbor_entry_t* asym_neighbor_ptr = entry_ptr_list[neighbor_id_list[n]];
+                    asym_neighbor_ptr->routing_info.next_hop = potential_mpr_list[neighbor_id_list[n]];
+                    asym_neighbor_ptr->routing_info.hop_num = 2;
+                    asym_neighbor_ptr->routing_info.path_metric = mpr_metric_list[neighbor_id_list[n]];
+                }
             }
         }
     }
 }
 
 // select MPR according latest info base and update node entry status
-void update_mpr_status () {
+// if mpr_flag == 0, then flooding MPR (outgoing metric); otherwise, routing MPR(incoming metric)
+void update_mpr_status (uint8_t mpr_flag) {
     // the list of potential MPR node id
     int16_t *potential_mpr_list = NULL;
     uint8_t *min_metric_list = NULL; // the min metric can be achieved by N1
@@ -823,7 +851,7 @@ void update_mpr_status () {
         mpr_metric_list[i] = 255; // inf
         min_metric_list[i] = 255;
     }
-    compute_min_metric(min_metric_list);
+    compute_min_metric(min_metric_list, mpr_flag);
 
     // this is according to the example MPR Selection Algorithm in RFC7181 Appendix B.2
     // Notations:
@@ -871,7 +899,7 @@ void update_mpr_status () {
         // we have a slot with only one competer. it wins.
         if (potential_mpr > 0) {
             // update according to selected MPR
-            update_with_new_mpr(potential_mpr_list, mpr_metric_list, potential_mpr);
+            update_with_new_mpr(potential_mpr_list, mpr_metric_list, potential_mpr, mpr_flag);
         }
     }
 
@@ -899,7 +927,13 @@ void update_mpr_status () {
                     continue;
                 }
                 tmp_D ++; // add the number of covered two hop nodes
-                uint8_t tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+                uint16_t tmp_metric = 0;
+                if (mpr_flag == 0) {
+                    tmp_metric = neighbor_ptr->link_metric + neighbor_ptr->link_info.metric_list_ptr[l];
+                }
+                else {
+                    tmp_metric = neighbor_ptr->in_link_metric + neighbor_ptr->link_info.in_metric_list_ptr[l];
+                }
                 // if reaches min metric and smaller than mpr_metric, add R by one. I can cover this one.
                 assert(tmp_metric >= min_metric_list[two_hop_id]);
                 if (tmp_metric == min_metric_list[two_hop_id] && tmp_metric < mpr_metric_list[two_hop_id]) {
@@ -925,11 +959,11 @@ void update_mpr_status () {
             break;
         }
         // we have a winner
-        update_with_new_mpr(potential_mpr_list, mpr_metric_list, best_MPR);
+        update_with_new_mpr(potential_mpr_list, mpr_metric_list, best_MPR, mpr_flag);
     }
 
     // 4. record MPR results
-    record_mpr_selection(potential_mpr_list, mpr_metric_list);
+    record_mpr_selection(potential_mpr_list, mpr_metric_list, mpr_flag);
 
     // FREE mem
     free(potential_mpr_list);

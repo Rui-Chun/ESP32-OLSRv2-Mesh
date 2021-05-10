@@ -136,7 +136,7 @@ void gen_hello_msg (hello_msg_t* hello_msg_ptr);
 uint8_t parse_tc_msg (tc_msg_t* tc_msg_ptr, uint8_t recv_mac[RFC5444_ADDR_LEN]);
 uint8_t gen_tc_msg (tc_msg_t* tc_msg_ptr);
 uint8_t get_or_create_id (uint8_t mac_addr[RFC5444_ADDR_LEN], uint8_t* peer_id);
-void update_mpr_status ();
+void update_mpr_status (uint8_t mpr_flag);
 void check_entry_validity();
 void update_id_lists();
 void compute_routing_set();
