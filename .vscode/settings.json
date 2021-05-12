@@ -1,6 +1,6 @@
 {
   "C_Cpp.intelliSenseEngine": "Tag Parser",
-  "idf.port": "/dev/cu.usbserial-0225F9F2",
+  "idf.port": "/dev/cu.usbserial-142320",
   "idf.flashType": "UART",
   "files.associations": {
     "numeric": "c",

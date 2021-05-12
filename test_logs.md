@@ -1,13 +1,31 @@
-# TESTS
-
-1. Four nodes in a line.
+# TESTS - experimental deployment and outputs
+## 1. Four nodes in a line.
 
 Topology: 
 **node N0(3c:61:05:4c:36:cc) - N1(3c:61:05:4c:3c:28) - N2(08:3a:f2:6e:05:94) - N3(08:3a:f2:6c:d3:bc)**
 
-Note: 'Node id = #1' does not means N1. This is only the local identifier of each node. Please use mac addresses as global reference.
+**Explaination for different fields:**
+- 'Neighbors/TWO_HOPs/REMOTEs' shows all the nodes types recorded by the local node.
+- 'Node id = #1' does not means N1. This is only the local identifier of each node. Please use mac addresses as global reference.
+- 'link_status': 1 for LINK_SYMMETRIC, 0 for LINK_HEARD
+- 'MPR status' gives (routing MPR status, flooding MPR status). The definition of value is as follow.
+    ```
+    typedef enum flooding_mpr_status_t {
+        NOT_FLOODING = 0,                   // this node is not a flooding MPR
+        FLOODING_TO,                    // this node is local node's flooding MPR
+        FLOODING_FROM,                  // is flooding selector
+        FLOODING_TO_FROM,               // is flooding MPR and selector
+    } flooding_mpr_status_t;
 
-Output from node #N1(3c:61:05:4c:3c:28)
+    typedef enum routing_mpr_status_t {
+        NOT_ROUTING = 0,
+        ROUTING_TO,
+        ROUTING_FROM,
+        ROUTING_TO_FROM,
+    } routing_mpr_status_t;
+    ```
+
+### Output from node #N1(3c:61:05:4c:3c:28)
 ```
 Start printing topology info.
 Neighbors :
@@ -24,7 +42,8 @@ TWO_HOPs :
 REMOTEs: 
 Done printing topology info.
 ```
-Output from node #N0(3c:61:05:4c:36:cc)
+
+### Output from node #N0(3c:61:05:4c:36:cc)
 ```
 Start printing topology info.
 Neighbors :
@@ -42,11 +61,13 @@ REMOTEs:
 Done printing topology info.
 ```
 
-2. seven nodes as a mesh
+## 2. seven nodes as a mesh
 
-N0(3c:61:05:4c:36:cc) - N1(3c:61:05:4c:3c:28) - N2(08:3a:f2:6e:05:94) - N3(08:3a:f2:6c:d3:bc) - N4(c4:4f:33:7f:78:e9) - N5(3c:61:05:0c:38:e8) - N6(3c:61:05:0d:59:94)
+**N0(3c:61:05:4c:36:cc) - N1(3c:61:05:4c:3c:28) - N2(08:3a:f2:6e:05:94) - N3(08:3a:f2:6c:d3:bc) - N4(c4:4f:33:7f:78:e9) - N5(3c:61:05:0c:38:e8) - N6(3c:61:05:0d:59:94)**
 
-Output from N1(3c:61:05:4c:3c:28)
+**Notes:** Please refer to the project report to view the topology. Also, the link_info fields shown here may not be up-to-date. Also, there is an unsolved bug of showing #0 multiple times, which I have not got time to fix. 
+
+### Output from N1(3c:61:05:4c:3c:28)
 ```
 Start printing topology info.
 Neighbors : (N2, N0, N5, N4)
@@ -72,7 +93,7 @@ TWO_HOPs :
 REMOTEs: 
 ```
 
-Output from N0(3c:61:05:4c:36:cc)
+### Output from N0(3c:61:05:4c:36:cc)
 ```
 Start printing topology info.
 Neighbors : (N1)
