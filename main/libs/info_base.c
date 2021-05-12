@@ -1,5 +1,8 @@
 #include "info_base.h"
 
+// set this to 0 if you want less MPR logs
+#define VERBOSE_MPR 0
+
 static const char *TAG = "espnow_info_base";
 
 // static variables should be init as zeros by the compiler.
@@ -740,7 +743,9 @@ void compute_min_metric (uint8_t* min_metric_list, uint8_t mpr_flag) {
 // assign the min metric according the new mpr's link info
 // if mpr_flag == 0, then flooding MPR (outgoing metric); otherwise, routing MPR(incoming metric)
 void update_with_new_mpr (int16_t* mpr_list, uint8_t* metric_list, uint8_t new_mpr_id, uint8_t mpr_flag) {
+#if VERBOSE_MPR
     ESP_LOGI(TAG, "Updating new MPR #%d .", new_mpr_id);
+#endif
     neighbor_entry_t* neighbor_ptr = entry_ptr_list[new_mpr_id];
     assert(neighbor_ptr !=  NULL);
     assert(neighbor_ptr->link_status == LINK_SYMMETRIC);
@@ -873,7 +878,9 @@ void update_mpr_status (uint8_t mpr_flag) {
         for(int l=0; l < neighbor_ptr->link_info.link_num; l++) {
             two_hop_id = neighbor_ptr->link_info.id_list_ptr[l];
             // if this is not a two hop node, skip this one.
+#if VERBOSE_MPR
             ESP_LOGI(TAG, "neighbor #%d, has two-hop #%d", neighbor_id, two_hop_id);
+#endif
             if ( !is_two_hop_node(two_hop_id)) {
                 continue;
             }
@@ -891,7 +898,9 @@ void update_mpr_status (uint8_t mpr_flag) {
         // simple coverage check
         // this must be int!
         int16_t potential_mpr = potential_mpr_list[two_hop_id_list[x]];
+#if VERBOSE_MPR
         ESP_LOGI(TAG, "x=%d, two_hop id = %d, potential mpr = #%d", x, two_hop_id_list[x], potential_mpr);
+#endif
         if (potential_mpr == 0) {
             ESP_LOGW(TAG, "Unlinked two-hop node #%d", two_hop_id_list[x]);
             continue;

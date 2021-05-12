@@ -5,6 +5,8 @@
 
 #include "info_base.h"
 
+// set this to 0 if you want less routing debug logs
+#define VERBOSE_ROUTING 0
 
 static const char *TAG = "espnow_routing_set";
 
@@ -21,7 +23,9 @@ uint8_t find_min_metric () {
     uint8_t min_node_id = 0;
     uint8_t min_metric = 255;
     for(int p = 1; p <= peer_num; p++) { // do not use #0, use [1, peer_num]
-        ESP_LOGI(TAG, "#%d, metric %d", p, routing_metric_list[p]);
+#if VERBOSE_ROUTING
+        ESP_LOGI(TAG, "searching for min: #%d, metric %d", p, routing_metric_list[p]);
+#endif
         if (routing_metric_list[p] <= 0) continue;
         if (routing_metric_list[p] < min_metric) {
             min_metric = routing_metric_list[p];
@@ -72,7 +76,9 @@ void compute_routing_set () {
     while (1) {
         // (1) find the node with min metric, break if all used.
         new_node_id = find_min_metric();
+#if VERBOSE_ROUTING
         ESP_LOGI(TAG, "Updating with #%d", new_node_id);
+#endif
         if (new_node_id == 0) break;
         // (2) update metric list with its link info. 
         //     we need to update all routing_info of linked unused nodes.
@@ -90,7 +96,9 @@ void compute_routing_set () {
                 // udpate metric list
                 routing_metric_list[linked_id] = routing_metric_list[new_node_id] + new_link_info.metric_list_ptr[l];
                 // update link info
+#if VERBOSE_ROUTING
                 ESP_LOGI(TAG, "Updating linked node #%d routing info!", linked_id);
+#endif
                 linked_routing_ptr = get_routing_info_ptr(linked_id);
                 linked_routing_ptr->next_hop = new_routing_ptr->next_hop;
                 linked_routing_ptr->hop_num = new_routing_ptr->hop_num + 1;
