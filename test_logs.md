@@ -5,6 +5,8 @@
 Topology: 
 **node N0(3c:61:05:4c:36:cc) - N1(3c:61:05:4c:3c:28) - N2(08:3a:f2:6e:05:94) - N3(08:3a:f2:6c:d3:bc)**
 
+Note: 'Node id = #1' does not means N1. This is only the local identifier of each node. Please use mac addresses as global reference.
+
 Output from node #N1(3c:61:05:4c:3c:28)
 ```
 Start printing topology info.
