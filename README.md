@@ -5,4 +5,4 @@
 - This project is developed with (ESP-IDF v4.2)[https://github.com/espressif/esp-idf]. You can compile and flash this project folowing the same approach for any example of ESP-IDF.
 
 ## More details
-TODO
+This project is developed based on the ESPNOW feature, an ad-hoc feature of ESP-32. With some modification, ESP-32 can achieve quick ad-hoc transmissions. So I built a Mesh network implementation accroding to OLSRv2. PLease check (this document)[./CS434_Project_Report.pdf] for more details if you are interested.
